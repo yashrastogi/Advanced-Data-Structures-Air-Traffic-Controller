@@ -292,13 +292,22 @@ public:
     }
 
     // Print rescheduled flights
-    if (!rescheduleETAChanged.empty()) {
+    BinaryHeap<pair<int, int>, less<pair<int, int>>> rescheduled;
+    for (const auto &entry : rescheduleETAChanged) {
+      rescheduled.push({entry.first, entry.second});
+    }  
+    if (!rescheduled.empty()) {
       cout << "Updated ETAs: [";
-      for (auto it = rescheduleETAChanged.begin();
-           it != rescheduleETAChanged.end(); it++) {
-        cout << it->first << ": " << it->second << ", ";
+      bool first = true;
+      while (!rescheduled.empty()) {
+        auto entry = rescheduled.pop();
+        if (!first) {
+          cout << ", ";
+        }
+        cout << entry.first << ": " << entry.second;
+        first = false;
       }
-      cout << "\b\b]" << endl;
+      cout << "]" << endl;
     }
   }
 
