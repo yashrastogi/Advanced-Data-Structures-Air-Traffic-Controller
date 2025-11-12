@@ -12,10 +12,13 @@
 
 using namespace std;
 
+// Global output stream for all program output
 stringstream ss;
 
+// Flight lifecycle states
 enum FlightState { PENDING, SCHEDULED, IN_PROGRESS, COMPLETED };
 
+// Initial flight submission data
 struct FlightRequest {
   int flightId;
   int airlineId;
@@ -28,6 +31,7 @@ struct FlightRequest {
         priority(priority), duration(duration) {}
 };
 
+// Flight data while in pending queue
 struct PendingFlight {
   int priority;
   int submitTime;
@@ -40,6 +44,7 @@ struct PendingFlight {
         flightRequest(flightRequest) {}
 };
 
+// Flight data after scheduling
 struct ActiveFlightData {
   int runwayId;
   int startTime;
@@ -55,6 +60,7 @@ struct ActiveFlightData {
         flightRequest(flightRequest) {}
 };
 
+// Entry in the time table for tracking completion times
 struct TimeTableEntry {
   int ETA;
   int flightId;
@@ -67,6 +73,7 @@ struct TimeTableEntry {
   }
 };
 
+// Comparator for pending flight priority queue
 struct CompPendingFlight {
   bool operator()(const PendingFlight &a, const PendingFlight &b) const {
     if (a.priority != b.priority) {
@@ -78,6 +85,7 @@ struct CompPendingFlight {
   }
 };
 
+// Handle entry for tracking flight state and references
 struct HandlesEntry {
   FlightState state;
   PairingHeapNode<PendingFlight> *pendingNode;
@@ -94,6 +102,7 @@ struct HandlesEntry {
         timeTableEntry(timeTableEntry) {}
 };
 
+// Comparator for time table entries
 struct CompTimeTableEntry {
   bool operator()(const TimeTableEntry &a, const TimeTableEntry &b) const {
     if (a.ETA != b.ETA) {
@@ -105,46 +114,33 @@ struct CompTimeTableEntry {
 
 class GatorAirTrafficSlotScheduler {
 public:
-  /* This tracks all runways by their next available time. It ensures that when
-  a flight is assigned, it always goes to the earliest free runway (ties by
-  runwayID). [Pair(Avail Time, RunwayID)] */
+  // Tracks runways by next available time
+  // Ensures flights are assigned to earliest free runway
   BinaryHeap<pair<int, int>, less<pair<int, int>>> runwayPool;
 
-  /* This is where every new flight request enters first. It ensures the system
-  can always pick the highest-priority flight next, breaking ties by submit time
-  and flightID. */
+  // Priority queue for new flight requests
+  // Orders by priority, submit time, and flight ID
   PairingHeap<PendingFlight, CompPendingFlight> pendingFlights;
 
-  /* Once a flight is scheduled, it is stored here. This lets the system quickly
-  find it by ID for operations like cancellation, reprioritization, or printing
-  all active flights. (Cancel means removing a flight from the system if it
-  hasn't started yet, Reprioritize means updating a flight's priority if the
-  airline changes its urgency. Both are explained fully in the Operations
-  section.) */
+  // Maps flight ID to active flight data
+  // Enables quick lookup for cancellation and reprioritization
   unordered_map<int, ActiveFlightData> activeFlights;
 
-  /* This keeps all scheduled flights sorted by their completion time. It
-  ensures the system can efficiently find which flights should finish when time
-  advances or when a Tick(t) command moves the system clock forward. (Tick(t)
-  means advancing the current system time to t, which triggers settling
-  completions and rescheduling. The full procedure is explained in the
-  Operations section.) */
+  // Sorted list of scheduled flights by completion time
+  // Enables efficient completion processing on time advancement
   BinaryHeap<TimeTableEntry, CompTimeTableEntry> timeTable;
 
-  /* This groups flights by airline while they are still unsatisfied (pending
- or scheduled-not-started). It makes airline-wide operations efficient without
- scanning all flights. (For example, a GroundHold on an airline means all of its
- unsatisfied flights are temporarily blocked from being scheduled. The details
- of GroundHold will be described in the Operations section.) */
+  // Groups flights by airline for unsatisfied flights
+  // Supports efficient airline-wide operations
   unordered_map<int, unordered_set<int>> airlineIndex;
 
-  /* This central map ties everything together. It stores references to where
-  each flight lives in the other data structures, so updates and deletions
-  happen quickly and consistently. */
+  // Central map storing references to flight locations
+  // Ensures quick and consistent updates across data structures
   unordered_map<int, HandlesEntry> handles;
 
   int currentTime;
 
+  // Initialize the system with specified number of runways
   void initialize(int runwayCount) {
     if (runwayCount <= 0) {
       ss << "Invalid input" << "\n";
@@ -156,6 +152,7 @@ public:
     ss << runwayCount << " Runways are now available" << "\n";
   }
 
+  // Submit a new flight request to the system
   void submitFlight(int flightId, int airlineId, int submitTime, int priority,
                     int duration) {
     tick(submitTime);
@@ -174,22 +171,23 @@ public:
     tick(submitTime);
   }
 
+  // Advance system time and process completions and rescheduling
   void tick(int currentTime) {
     this->currentTime = currentTime;
 
     // Phase 1: Settle completions
-    /*  • Find all flights with ETA <= currentTime.
-        • Mark them Completed, remove them from all data structures, and print
-       them in ascending ETA order, breaking ties by smaller flightID. */
+    // Find all flights with ETA at or before current time
+    // Mark them completed and remove from data structures
+    // Print in ascending ETA order with flight ID as tiebreaker
 
-    // Pair (ETA, Flight ID)
+    // Pair of ETA and Flight ID
     auto comp = [](const pair<int, int> &a, const pair<int, int> &b) {
       return a.first == b.first ? a.second < b.second : a.first < b.first;
     };
 
     BinaryHeap<pair<int, int>, decltype(comp)> completed(comp);
 
-    // Mark completed flights and perform data structures cleanup
+    // Process completed flights and clean up data structures
     while (!timeTable.empty() && timeTable.top().ETA <= currentTime) {
       int flightId = timeTable.top().flightId;
       completed.push({timeTable.top().ETA, flightId});
@@ -200,16 +198,16 @@ public:
       timeTable.pop();
     }
 
-    // Print completed flights in ascending ETA order
+    // Print completed flights in ascending order
     while (!completed.empty()) {
       ss << "Flight " << completed.top().second << " has landed at time "
          << completed.top().first << "\n";
       completed.pop();
     }
 
-    /* Promotion Step (between phases):
-    Before Phase 2 begins, any flight with startTime ≤ currentTime is marked
-    InProgress and excluded from rescheduling (non-preemptive rule). */
+    // Promotion step between phases
+    // Mark flights with start time at or before current time as in progress
+    // These flights are non-preemptive and excluded from rescheduling
     for (auto it = activeFlights.begin(); it != activeFlights.end(); it++) {
       if (it->second.startTime <= currentTime) {
         handles[it->first].state = IN_PROGRESS;
@@ -217,15 +215,15 @@ public:
       }
     }
 
-    /* Phase 2 - Reschedule unsatisfied flights */
-    // In use runways: (runwayId: ETA)
+    // Phase 2: Reschedule unsatisfied flights
+    // Track runways currently in use
     unordered_map<int, int> inUseRunways;
-    // Flights to be rescheduled: (flightId: ETA)
+    // Track flights whose ETA changed during rescheduling
     unordered_map<int, int> rescheduleETAChanged;
-    // Turn all scheduled flights to pending schedule
+    // Convert all scheduled flights back to pending for rescheduling
     for (auto it = activeFlights.begin(); it != activeFlights.end(); it++) {
       auto &e = (*it);
-      // Clear unsatisfed but scheduled flights
+      // Unschedule flights that are scheduled but not yet in progress
       if (handles[e.first].state == SCHEDULED) {
         handles[e.first].pendingNode = pendingFlights.push(PendingFlight(
             e.second.flightRequest.priority, handles[e.first].submitTime,
@@ -233,18 +231,18 @@ public:
         handles[e.first].state = PENDING;
         rescheduleETAChanged[e.first] = e.second.ETA;
         timeTable.eraseOne(handles[e.first].timeTableEntry);
-        // Don't erase from active flights but unset scheduling fields
+        // Unset scheduling fields but keep in active flights
         e.second.startTime = -1;
         e.second.ETA = -1;
         e.second.runwayId = -1;
       }
-      // Record in progress runways
+      // Track runways being used by in-progress flights
       else if (handles[e.first].state == IN_PROGRESS) {
         inUseRunways[e.second.runwayId] = e.second.ETA;
       }
     }
 
-    // Reset and recreate runways
+    // Rebuild runway pool with current availability
     int runwayCount = runwayPool.size();
     runwayPool.clear();
     for (int i = 0; i < runwayCount; i++) {
@@ -256,45 +254,38 @@ public:
       }
     }
 
-    // Schedule pending flights
+    // Schedule all pending flights
     while (!pendingFlights.empty()) {
       auto pendingFlight = pendingFlights.pop();
       auto runway = runwayPool.pop();
       int startTime = max(currentTime, runway.first);
       int ETA = startTime + pendingFlight.flightRequest.duration;
-      // Update runway status
+      // Return runway to pool with updated availability
       runwayPool.push({ETA, runway.second});
 
-      // Add scheduled flight to timeTable and activeFlights
+      // Add flight to time table and active flights
       auto timeTableEntry =
           TimeTableEntry(ETA, pendingFlight.flightId, runway.second);
       timeTable.push(timeTableEntry);
-
-      // // print timetable data()
-      // auto d = timeTable.data();
-      // for (size_t i = 0; i < timeTable.size(); i++) {
-      //   ss << "TimeTable Entry " << i << ": FlightID " << d[i].flightId
-      //        << ", ETA " << d[i].ETA << ", RunwayID " << d[i].runwayId <<
-      //        "\n";
-      // }
 
       activeFlights[pendingFlight.flightId] = ActiveFlightData(
           runway.second, startTime, ETA, pendingFlight.flightRequest);
       handles[pendingFlight.flightId] = HandlesEntry(
           SCHEDULED, nullptr, pendingFlight.submitTime, timeTableEntry);
 
+      // Track ETA changes or mark as new scheduling
       if (rescheduleETAChanged.count(pendingFlight.flightId) &&
           rescheduleETAChanged[pendingFlight.flightId] != ETA) {
         rescheduleETAChanged[pendingFlight.flightId] = ETA;
       } else if (!rescheduleETAChanged.count(pendingFlight.flightId)) {
         ss << "Flight " << pendingFlight.flightId << " scheduled - ETA: " << ETA
-           << "\n"; // New scheduling, print specially
+           << "\n";
       } else {
         rescheduleETAChanged.erase(pendingFlight.flightId);
       }
     }
 
-    // Print rescheduled flights
+    // Print rescheduled flights with updated ETAs
     BinaryHeap<pair<int, int>, less<pair<int, int>>> rescheduled;
     for (const auto &entry : rescheduleETAChanged) {
       rescheduled.push({entry.first, entry.second});
@@ -314,12 +305,13 @@ public:
     }
   }
 
+  // Print all scheduled flights within a time range
   void printSchedule(int t1, int t2) {
     PairingHeap<pair<int, string>, less<pair<int, string>>> schedulePrintHeap;
     for (const auto &entry : activeFlights) {
       if (handles[entry.first].state != SCHEDULED ||
           entry.second.startTime <= currentTime) {
-        continue; // Only consider scheduled flights
+        continue;
       }
       const ActiveFlightData &data = entry.second;
       if (data.ETA >= t1 && data.ETA <= t2) {
@@ -336,6 +328,7 @@ public:
     }
   }
 
+  // Print all active flights
   void printActive() {
     PairingHeap<pair<int, string>, less<pair<int, string>>> activePrintHeap;
     for (const auto &entry : activeFlights) {
@@ -353,6 +346,7 @@ public:
     }
   }
 
+  // Ground all flights for airlines in specified range
   void groundHold(int airlineLow, int airlineHigh, int currentTime) {
     tick(currentTime);
     if (airlineHigh < airlineLow) {
@@ -362,7 +356,7 @@ public:
 
     for (int airlineId = airlineLow; airlineId <= airlineHigh; airlineId++) {
       if (airlineIndex.count(airlineId)) {
-        // Create a copy of the flight IDs to avoid iterator invalidation
+        // Copy flight IDs to avoid iterator invalidation during removal
         vector<int> flightsToGround(airlineIndex[airlineId].begin(),
                                     airlineIndex[airlineId].end());
         for (int flightId : flightsToGround) {
@@ -382,6 +376,7 @@ public:
     tick(currentTime);
   }
 
+  // Add additional runways to the system
   void addRunways(int count, int currentTime) {
     tick(currentTime);
     if (count <= 0) {
@@ -397,6 +392,7 @@ public:
     tick(currentTime);
   }
 
+  // Update priority of a pending or scheduled flight
   void reprioritize(int flightId, int currentTime, int newPriority) {
     tick(currentTime);
     if (!handles.count(flightId)) {
@@ -410,14 +406,14 @@ public:
     }
 
     if (handles[flightId].state == PENDING) {
-      // Update in pendingFlights
+      // Update priority in pending flights queue
       auto flightRequest = handles[flightId].pendingNode->value.flightRequest;
       handles[flightId].pendingNode = pendingFlights.changeKey(
           handles[flightId].pendingNode,
           PendingFlight(newPriority, handles[flightId].submitTime, flightId,
                         flightRequest));
     } else {
-      // Update in activeFlights
+      // Update priority in active flights
       activeFlights[flightId].flightRequest.priority = newPriority;
     }
     ss << "Priority of Flight " << flightId << " has been updated to "
@@ -425,6 +421,7 @@ public:
     tick(currentTime);
   }
 
+  // Cancel a pending or scheduled flight
   void cancelFlight(int flightId, int currentTime) {
     tick(currentTime);
     if (!handles.count(flightId)) {
@@ -437,7 +434,7 @@ public:
          << "\n";
       return;
     }
-    // Remove from all data structures
+    // Clean up from all data structures
     if (handles[flightId].state == SCHEDULED) {
       timeTable.eraseOne(handles[flightId].timeTableEntry);
       airlineIndex[activeFlights[flightId].flightRequest.airlineId].erase(
@@ -455,6 +452,7 @@ public:
   }
 };
 
+// Quit program and write output to file
 void quit(ifstream &inputFile, char *argv[]) {
   ss << "Program Terminated!!" << "\n";
   inputFile.close();
@@ -472,6 +470,7 @@ void quit(ifstream &inputFile, char *argv[]) {
   exit(0);
 }
 
+// Main program entry point
 int main(int argc, char *argv[]) {
   if (argc != 2)
     throw std::invalid_argument("Invalid number of arguments");
@@ -484,6 +483,7 @@ int main(int argc, char *argv[]) {
   GatorAirTrafficSlotScheduler scheduler;
 
   string line;
+  // Process each command from input file
   while (getline(inputFile, line)) {
     if (line == "Quit()") {
       quit(inputFile, argv);
