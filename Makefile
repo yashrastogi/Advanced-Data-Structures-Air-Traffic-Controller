@@ -68,7 +68,7 @@ clean:
 # Nodemon helper (requires nodemon installed)
 .PHONY: nodemon
 nodemon:
-	nodemon --ext "cpp,hpp" --exec 'make run || exit 1'
+	nodemon --ext "cpp,hpp,txt" --exec 'make run || exit 1 ; make clean'
 
 # Show config
 .PHONY: info

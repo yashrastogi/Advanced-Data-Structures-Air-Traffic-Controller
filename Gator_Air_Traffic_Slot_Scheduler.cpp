@@ -1,3 +1,4 @@
+#include <climits>
 #include <ctime>
 #include <fstream>
 #include <iostream>
@@ -41,6 +42,9 @@ struct ActiveFlightData {
   int ETA;
   FlightRequest flightRequest;
 
+  ActiveFlightData()
+      : runwayId(0), startTime(0), ETA(0), flightRequest(0, 0, 0, 0, 0) {}
+
   ActiveFlightData(int runwayId, int startTime, int ETA,
                    FlightRequest flightRequest)
       : runwayId(runwayId), startTime(startTime), ETA(ETA),
@@ -53,6 +57,10 @@ struct TimeTableEntry {
   int runwayId;
   TimeTableEntry(int ETA, int flightId, int runwayId)
       : ETA(ETA), flightId(flightId), runwayId(runwayId) {}
+  bool operator==(const TimeTableEntry &other) const {
+    return flightId == other.flightId && ETA == other.ETA &&
+           runwayId == other.runwayId;
+  }
 };
 
 struct CompPendingFlight {
@@ -68,17 +76,18 @@ struct CompPendingFlight {
 
 struct HandlesEntry {
   FlightState state;
-  PairingHeapNode<PendingFlight> *node;
+  PairingHeapNode<PendingFlight> *pendingNode;
   int submitTime;
-  size_t timeTableIndex;
+  TimeTableEntry timeTableEntry;
 
   HandlesEntry()
-      : state(PENDING), node(nullptr), submitTime(0), timeTableIndex(0) {}
+      : state(PENDING), pendingNode(nullptr), submitTime(0),
+        timeTableEntry(TimeTableEntry(0, 0, 0)) {}
 
   HandlesEntry(FlightState state, PairingHeapNode<PendingFlight> *node,
-               int submitTime, size_t timeTableIndex)
-      : state(state), node(node), submitTime(submitTime),
-        timeTableIndex(timeTableIndex) {}
+               int submitTime, TimeTableEntry timeTableEntry)
+      : state(state), pendingNode(node), submitTime(submitTime),
+        timeTableEntry(timeTableEntry) {}
 };
 
 struct CompTimeTableEntry {
@@ -146,8 +155,8 @@ public:
   void submitFlight(int flightId, int airlineId, int submitTime, int priority,
                     int duration) {
     tick(submitTime);
-    if (activeFlights.count(flightId)) {
-      cout << "Duplicate flight" << endl;
+    if (handles.count(flightId)) {
+      cout << "Duplicate FlightID" << endl;
       return;
     }
 
@@ -155,8 +164,8 @@ public:
         priority, submitTime, flightId,
         FlightRequest(flightId, airlineId, submitTime, priority, duration)));
     airlineIndex[airlineId].insert(flightId);
-    handles[flightId] =
-        HandlesEntry(PENDING, pendingFlightHeapNode, submitTime, -1);
+    handles[flightId] = HandlesEntry(PENDING, pendingFlightHeapNode, submitTime,
+                                     TimeTableEntry(0, 0, 0));
 
     tick(submitTime);
   }
@@ -178,13 +187,12 @@ public:
 
     // Mark completed flights and perform data structures cleanup
     while (!timeTable.empty() && timeTable.top().ETA <= currentTime) {
-      // auto entry = timeTable.top();
       int flightId = timeTable.top().flightId;
       completed.push({timeTable.top().ETA, flightId});
-      int airlineId = activeFlights.at(flightId).flightRequest.airlineId;
+      int airlineId = activeFlights[flightId].flightRequest.airlineId;
       airlineIndex[airlineId].erase(flightId);
       activeFlights.erase(flightId);
-      handles.at(flightId).state = COMPLETED;
+      handles[flightId].state = COMPLETED;
       timeTable.pop();
     }
 
@@ -200,7 +208,7 @@ public:
     InProgress and excluded from rescheduling (non-preemptive rule). */
     for (auto it = activeFlights.begin(); it != activeFlights.end(); it++) {
       if (it->second.startTime <= currentTime) {
-        handles.at(it->first).state = IN_PROGRESS;
+        handles[it->first].state = IN_PROGRESS;
         airlineIndex[it->second.flightRequest.airlineId].erase(it->first);
       }
     }
@@ -211,24 +219,24 @@ public:
     // Flights to be rescheduled: (flightId: ETA)
     unordered_map<int, int> rescheduleETAChanged;
     // Turn all scheduled flights to pending schedule
-    for (auto it = activeFlights.begin(); it != activeFlights.end();) {
-      auto e = (*it);
+    for (auto it = activeFlights.begin(); it != activeFlights.end(); it++) {
+      auto &e = (*it);
       // Clear unsatisfed but scheduled flights
       if (handles[e.first].state == SCHEDULED) {
-        handles[e.first].node = pendingFlights.push(PendingFlight(
+        handles[e.first].pendingNode = pendingFlights.push(PendingFlight(
             e.second.flightRequest.priority, handles[e.first].submitTime,
             e.first, e.second.flightRequest));
         handles[e.first].state = PENDING;
         rescheduleETAChanged[e.first] = e.second.ETA;
-        timeTable.eraseOne(handles[e.first].timeTableIndex);
-        it = activeFlights.erase(it);
+        timeTable.eraseOne(handles[e.first].timeTableEntry);
+        // Don't erase from active flights but unset scheduling fields
+        e.second.startTime = -1;
+        e.second.ETA = -1;
+        e.second.runwayId = -1;
       }
       // Record in progress runways
       else if (handles[e.first].state == IN_PROGRESS) {
         inUseRunways[e.second.runwayId] = e.second.ETA;
-        ++it;
-      } else {
-        ++it;
       }
     }
 
@@ -252,13 +260,24 @@ public:
       int ETA = startTime + pendingFlight.flightRequest.duration;
       // Update runway status
       runwayPool.push({ETA, runway.second});
-      size_t timeTableIndex = timeTable.push(
-          TimeTableEntry(ETA, pendingFlight.flightId, runway.second));
-      activeFlights.emplace(pendingFlight.flightId,
-                            ActiveFlightData(runway.second, startTime, ETA,
-                                             pendingFlight.flightRequest));
+
+      // Add scheduled flight to timeTable and activeFlights
+      auto timeTableEntry =
+          TimeTableEntry(ETA, pendingFlight.flightId, runway.second);
+      timeTable.push(timeTableEntry);
+
+      // // print timetable data()
+      // auto d = timeTable.data();
+      // for (size_t i = 0; i < timeTable.size(); i++) {
+      //   cout << "TimeTable Entry " << i << ": FlightID " << d[i].flightId
+      //        << ", ETA " << d[i].ETA << ", RunwayID " << d[i].runwayId <<
+      //        endl;
+      // }
+
+      activeFlights[pendingFlight.flightId] = ActiveFlightData(
+          runway.second, startTime, ETA, pendingFlight.flightRequest);
       handles[pendingFlight.flightId] = HandlesEntry(
-          SCHEDULED, nullptr, pendingFlight.submitTime, timeTableIndex);
+          SCHEDULED, nullptr, pendingFlight.submitTime, timeTableEntry);
 
       if (rescheduleETAChanged.count(pendingFlight.flightId) &&
           rescheduleETAChanged[pendingFlight.flightId] != ETA) {
@@ -266,7 +285,7 @@ public:
       } else if (!rescheduleETAChanged.count(pendingFlight.flightId)) {
         cout << "Flight " << pendingFlight.flightId
              << " scheduled - ETA: " << ETA
-             << endl; // New scheduling, no change in ETA
+             << endl; // New scheduling, print specially
       } else {
         rescheduleETAChanged.erase(pendingFlight.flightId);
       }
@@ -274,7 +293,6 @@ public:
 
     // Print rescheduled flights
     if (!rescheduleETAChanged.empty()) {
-
       cout << "Updated ETAs: [";
       for (auto it = rescheduleETAChanged.begin();
            it != rescheduleETAChanged.end(); it++) {
@@ -285,33 +303,148 @@ public:
   }
 
   void printSchedule(int t1, int t2) {
-    cout << "Printing schedule from " << t1 << " to " << t2 << endl;
-    // activeFlights'
+    PairingHeap<pair<int, string>, less<pair<int, string>>> schedulePrintHeap;
+    for (const auto &entry : activeFlights) {
+      if (handles[entry.first].state != SCHEDULED ||
+          entry.second.startTime <= currentTime) {
+        continue; // Only consider scheduled flights
+      }
+      const ActiveFlightData &data = entry.second;
+      if (data.ETA >= t1 && data.ETA <= t2) {
+        schedulePrintHeap.push({data.ETA, "[" + to_string(entry.first) + "]"});
+      }
+    }
+
+    if (schedulePrintHeap.empty()) {
+      cout << "There are no flights in that time period" << endl;
+    }
+
+    while (!schedulePrintHeap.empty()) {
+      cout << schedulePrintHeap.pop().second << endl;
+    }
   }
 
-  void printActive() {}
+  void printActive() {
+    PairingHeap<pair<int, string>, less<pair<int, string>>> activePrintHeap;
+    for (const auto &entry : activeFlights) {
+      const ActiveFlightData &data = entry.second;
+      activePrintHeap.push(
+          {entry.first, "[flight" + to_string(entry.first) + ", airline" +
+                            to_string(data.flightRequest.airlineId) +
+                            ", runway" + to_string(data.runwayId) + ", start" +
+                            to_string(data.startTime) + ", ETA" +
+                            to_string(data.ETA) + "]"});
+    }
+    while (!activePrintHeap.empty()) {
+      cout << activePrintHeap.top().second << endl;
+      activePrintHeap.pop();
+    }
+  }
 
   void groundHold(int airlineLow, int airlineHigh, int currentTime) {
-    cout << "Grounding flights from " << airlineLow << " to " << airlineHigh
-         << " from " << currentTime << endl;
+    tick(currentTime);
+    if (airlineHigh < airlineLow) {
+      cout << "Invalid input. Please provide a valid airline range." << endl;
+      return;
+    }
+
+    for (int airlineId = airlineLow; airlineId <= airlineHigh; airlineId++) {
+      if (airlineIndex.count(airlineId)) {
+        // Create a copy of the flight IDs to avoid iterator invalidation
+        vector<int> flightsToGround(airlineIndex[airlineId].begin(),
+                                    airlineIndex[airlineId].end());
+        for (int flightId : flightsToGround) {
+          if (handles[flightId].state == PENDING) {
+            pendingFlights.eraseOne(handles[flightId].pendingNode);
+          } else if (handles[flightId].state == SCHEDULED) {
+            timeTable.eraseOne(handles[flightId].timeTableEntry);
+          }
+          activeFlights.erase(flightId);
+          handles.erase(flightId);
+          airlineIndex[airlineId].erase(flightId);
+        }
+      }
+    }
+    cout << "Flights of the airlines in the range [" << airlineLow << ", "
+         << airlineHigh << "] have been grounded" << endl;
+    tick(currentTime);
   }
 
   void addRunways(int count, int currentTime) {
-    cout << "addRunways" << count << currentTime << endl;
+    tick(currentTime);
+    if (count <= 0) {
+      cout << "Invalid input. Please provide a valid number of runways."
+           << endl;
+      return;
+    }
+    int existingRunways = runwayPool.size();
+    for (int i = 0; i < count; i++) {
+      runwayPool.push({currentTime, existingRunways + i + 1});
+    }
+    cout << "Additional " << count << " Runways are now available" << endl;
+    tick(currentTime);
   }
 
   void reprioritize(int flightId, int currentTime, int newPriority) {
-    cout << "Reprioritizing flight " << flightId << " from " << currentTime
-         << " to " << newPriority << endl;
+    tick(currentTime);
+    if (!handles.count(flightId)) {
+      cout << "Flight " << flightId << " does not exist" << endl;
+      return;
+    } else if (handles[flightId].state == IN_PROGRESS ||
+               handles[flightId].state == COMPLETED) {
+      cout << "Cannot reprioritize: Flight " << flightId
+           << " has already departed" << endl;
+      return;
+    }
+
+    if (handles[flightId].state == PENDING) {
+      // Update in pendingFlights
+      auto flightRequest = handles[flightId].pendingNode->value.flightRequest;
+      handles[flightId].pendingNode = pendingFlights.changeKey(
+          handles[flightId].pendingNode,
+          PendingFlight(newPriority, handles[flightId].submitTime, flightId,
+                        flightRequest));
+    } else {
+      // Update in activeFlights
+      activeFlights[flightId].flightRequest.priority = newPriority;
+    }
+    cout << "Priority of Flight " << flightId << " has been updated to "
+         << newPriority << endl;
+    tick(currentTime);
   }
 
   void cancelFlight(int flightId, int currentTime) {
-    cout << "Cancelling flight " << flightId << " at " << currentTime << endl;
+    tick(currentTime);
+    if (!handles.count(flightId)) {
+      cout << "Flight does not exist" << endl;
+      return;
+    }
+    if (handles[flightId].state == IN_PROGRESS ||
+        handles[flightId].state == COMPLETED) {
+      cout << "Cannot cancel: Flight " << flightId << " has already departed"
+           << endl;
+      return;
+    }
+    // Remove from all data structures
+    if (handles[flightId].state == SCHEDULED) {
+      timeTable.eraseOne(handles[flightId].timeTableEntry);
+      airlineIndex[activeFlights[flightId].flightRequest.airlineId].erase(
+          flightId);
+    }
+    if (handles[flightId].state == PENDING) {
+      airlineIndex[handles[flightId].pendingNode->value.flightRequest.airlineId]
+          .erase(flightId);
+      pendingFlights.eraseOne(handles[flightId].pendingNode);
+    }
+    activeFlights.erase(flightId);
+    handles.erase(flightId);
+    cout << "Flight " << flightId << " has been canceled" << endl;
+    tick(currentTime);
   }
 };
 
 void quit() {
-  cout << "Program Terminated." << endl;
+  cout << "Program Terminated!!" << endl;
   exit(0);
 }
 
@@ -320,7 +453,7 @@ int main(int argc, char *argv[]) {
     throw std::invalid_argument("Invalid number of arguments");
   ifstream inputFile(argv[1]);
   if (!inputFile.is_open()) {
-    cerr << "Failed to open input file." << endl;
+    cerr << "Failed to open input file" << endl;
     return 1;
   }
 

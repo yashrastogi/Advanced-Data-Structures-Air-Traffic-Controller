@@ -31,11 +31,7 @@ private:
     return i;
   }
 
-  void swap(T *a, T *b) {
-    T temp = *a;
-    *a = *b;
-    *b = temp;
-  }
+  void swap(T *a, T *b) { std::swap(*a, *b); }
 
   size_t bubbleDown(size_t i) {
     size_t most = i;
@@ -68,24 +64,22 @@ public:
     }
   }
 
-  bool eraseOne(size_t arrIndex) {
-    if (arrIndex >= data_.size())
+  bool eraseOne(T &value) {
+    size_t arrIndex = 0;
+    bool found = false;
+    for (size_t i = 0; i < size(); i++) {
+      if (data_[i] == value) {
+        arrIndex = i;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
       return false;
     swap(&data_[arrIndex], &data_[size() - 1]);
     data_.pop_back();
     bubbleDown(arrIndex);
     return true;
-  }
-
-  bool eraseOne(T value) {
-    for (size_t i = 0; i < size(); i++) {
-      if (data_[i] == value) {
-        swap(&data_[i], &data_[size() - 1]);
-        data_.pop_back();
-        bubbleDown(i);
-      }
-    }
-    return false;
   }
 
   T pop() {
@@ -102,8 +96,15 @@ public:
     for (size_t i = 0; i < size(); i++) {
       if (data_[i] == value) {
         data_[i] = newValue;
-        swap(&data_[i], &data_[size() - 1]);
-        bubbleUp(size() - 1);
+        // Determine direction: comp_(a, b) means a > b (higher priority)
+        // If newValue > oldValue, priority increased → bubble up
+        // If oldValue > newValue, priority decreased → bubble down
+        if (comp_(newValue, value)) {
+          bubbleUp(i);
+        } else if (comp_(value, newValue)) {
+          bubbleDown(i);
+        }
+        // If equal, no movement needed
         return true;
       }
     }
@@ -116,16 +117,14 @@ public:
     return data_[0];
   }
 
-  size_t push(const T &value) {
+  void push(const T &value) {
     data_.emplace_back(value);
-    return bubbleUp(data_.size() - 1);
+    bubbleUp(data_.size() - 1);
   }
 
   ~BinaryHeap() { clear(); }
 
-  void clear() noexcept {
-      data_.clear();
-  }
+  void clear() noexcept { data_.clear(); }
 
   std::vector<T> data() const { return data_; }
 

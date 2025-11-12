@@ -90,28 +90,38 @@ public:
   }
 
   // Only allowed to increase or keep same the priority
-  void changeKey(PairingHeapNode<T> *theNode, T newValue) {
+  PairingHeapNode<T> * changeKey(PairingHeapNode<T> *theNode, T newValue) {
     if (!theNode)
       throw std::runtime_error("Node to change doesn't exist");
 
     T value = theNode->value;
 
+    // For max heap: comp_(a, b) means a > b (a has higher priority)
+    // If old value has higher priority than new, that's a decrease,
+    // delete and reinsert element instead.
     if (comp_(value, newValue)) {
-      throw std::runtime_error("Only increasing priority allowed");
+      eraseOne(theNode);
+      return push(newValue);
+      // throw std::runtime_error("Only increasing priority allowed");
     }
 
     theNode->value = newValue;
 
-    if (comp_(value, newValue)) {
-      return;
+    // If priority increased (newValue > value), we need to restructure
+    // If priority stayed same (newValue == value), no restructuring needed
+    if (!comp_(newValue, value)) {
+      // Priority didn't increase, no restructuring needed
+      return theNode;
     }
 
+    // Priority increased - if it's the root, it's already at the top
     if (theNode == root_)
-      return;
+      return theNode;
 
+    // Detach and meld to maintain heap property
     detachNode(theNode);
-
     root_ = meld(root_, theNode);
+    return theNode;
   }
 
   // Only allowed to increase or keep same the priority
