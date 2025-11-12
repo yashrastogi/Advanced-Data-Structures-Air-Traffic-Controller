@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
+// Node structure for pairing heap
 template <typename T> struct PairingHeapNode {
   T value;
   PairingHeapNode<T> *child{nullptr};
@@ -10,12 +11,14 @@ template <typename T> struct PairingHeapNode {
   PairingHeapNode<T> *rightSibling{nullptr};
 };
 
+// Pairing heap implementation with customizable comparison
 template <typename T, typename Compare = std::greater<T>> class PairingHeap {
 public:
   Compare comp_{};
   std::size_t totalNodes{0};
   PairingHeapNode<T> *root_{nullptr};
 
+  // Removes a node from its current position in the heap
   void detachNode(PairingHeapNode<T> *theNode) {
     if (!theNode || theNode == root_)
       return;
@@ -39,6 +42,7 @@ public:
     theNode->rightSibling = nullptr;
   }
 
+  // Combines two heaps into one
   PairingHeapNode<T> *meld(PairingHeapNode<T> *a, PairingHeapNode<T> *b) {
     if (!a)
       return b;
@@ -81,6 +85,7 @@ public:
     }
   }
 
+  // Inserts a new element and returns the node pointer
   PairingHeapNode<T> *push(const T &value) {
     PairingHeapNode<T> *newNode =
         new PairingHeapNode<T>{value, nullptr, nullptr, nullptr};
@@ -89,32 +94,27 @@ public:
     return newNode;
   }
 
-  // Only allowed to increase or keep same the priority
+  // Changes the key of a node and repositions it
   PairingHeapNode<T> *changeKey(PairingHeapNode<T> *theNode, T newValue) {
     if (!theNode)
       throw std::runtime_error("Node to change doesn't exist");
 
     T value = theNode->value;
 
-    // For max heap: comp_(a, b) means a > b (a has higher priority)
-    // If old value has higher priority than new, that's a decrease,
-    // delete and reinsert element instead.
+    // If priority decreases, delete and reinsert
     if (comp_(value, newValue)) {
       eraseOne(theNode);
       return push(newValue);
-      // throw std::runtime_error("Only increasing priority allowed");
     }
 
     theNode->value = newValue;
 
-    // If priority increased (newValue > value), we need to restructure
-    // If priority stayed same (newValue == value), no restructuring needed
+    // No restructuring needed if priority did not increase
     if (!comp_(newValue, value)) {
-      // Priority didn't increase, no restructuring needed
       return theNode;
     }
 
-    // Priority increased - if it's the root, it's already at the top
+    // If node is root, it is already at the top
     if (theNode == root_)
       return theNode;
 
@@ -124,11 +124,13 @@ public:
     return theNode;
   }
 
-  // Only allowed to increase or keep same the priority
+  // Changes the key of an element by finding its node
   void changeKey(T value, T newValue) { changeKey(findNode(value), newValue); }
 
+  // Removes the first occurrence of a value
   bool eraseOne(T value) { return eraseOne(findNode(value)); }
 
+  // Removes a specific node from the heap
   bool eraseOne(PairingHeapNode<T> *theNode) {
     if (!theNode || !root_)
       return false;
@@ -150,12 +152,14 @@ public:
     return true;
   }
 
+  // Returns the top element without removing it
   const T &top() const {
     if (!root_)
       throw std::runtime_error("PairingHeap is empty (no top)");
     return root_->value;
   }
 
+  // Removes and returns the top element
   T pop() {
     if (!root_)
       throw std::runtime_error("PairingHeap is empty");
@@ -163,6 +167,7 @@ public:
     T value = root_->value;
     PairingHeapNode<T> *childPointer = root_->child;
     std::vector<PairingHeapNode<T> *> meldStack;
+    // Two pass merging of children
     while (childPointer && childPointer->rightSibling) {
       PairingHeapNode<T> *first = childPointer;
       PairingHeapNode<T> *second = childPointer->rightSibling;
@@ -200,6 +205,7 @@ public:
 
   ~PairingHeap() { clear(); }
 
+  // Removes all elements from the heap
   void clear() noexcept {
     if (!root_)
       return;
@@ -215,6 +221,7 @@ public:
     totalNodes = 0;
   }
 
+  // Searches for a node with the given value
   PairingHeapNode<T> *findNode(const T &value) {
     if (!root_)
       return nullptr;

@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
+// Binary heap implementation with customizable comparison
 template <typename T, typename Compare = std::greater<T>> class BinaryHeap {
 private:
   std::vector<T> data_{};
@@ -15,10 +16,13 @@ private:
     return (index - 1) / 2;
   }
 
+  // Returns the left child index
   size_t leftChild(int index) const { return 2 * index + 1; }
 
+  // Returns the right child index
   size_t rightChild(int index) const { return 2 * index + 2; }
 
+  // Moves element up the heap to maintain heap property
   size_t bubbleUp(size_t i) {
     while (i != 0) {
       if (comp_(data_[i], data_[parent(i)])) {
@@ -31,8 +35,10 @@ private:
     return i;
   }
 
+  // Swaps two elements
   void swap(T *a, T *b) { std::swap(*a, *b); }
 
+  // Moves element down the heap to maintain heap property
   size_t bubbleDown(size_t i) {
     size_t most = i;
 
@@ -64,6 +70,7 @@ public:
     }
   }
 
+  // Removes the first occurrence of a value from the heap
   bool eraseOne(T &value) {
     size_t arrIndex = 0;
     bool found = false;
@@ -82,6 +89,7 @@ public:
     return true;
   }
 
+  // Removes and returns the top element
   T pop() {
     if (size() == 0)
       throw std::out_of_range("BinaryHeap is empty");
@@ -92,31 +100,31 @@ public:
     return value;
   }
 
+  // Changes the key of an element and repositions it
   bool changeKey(T value, T newValue) {
     for (size_t i = 0; i < size(); i++) {
       if (data_[i] == value) {
         data_[i] = newValue;
-        // Determine direction: comp_(a, b) means a > b (higher priority)
-        // If newValue > oldValue, priority increased → bubble up
-        // If oldValue > newValue, priority decreased → bubble down
+        // Bubble up if priority increased, bubble down if decreased
         if (comp_(newValue, value)) {
           bubbleUp(i);
         } else if (comp_(value, newValue)) {
           bubbleDown(i);
         }
-        // If equal, no movement needed
         return true;
       }
     }
     return false;
   }
 
+  // Returns the top element without removing it
   T top() {
     if (size() == 0)
       throw std::out_of_range("BinaryHeap is empty (no top)");
     return data_[0];
   }
 
+  // Inserts a new element into the heap
   void push(const T &value) {
     data_.emplace_back(value);
     bubbleUp(data_.size() - 1);
