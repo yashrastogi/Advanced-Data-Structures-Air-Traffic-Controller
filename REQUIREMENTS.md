@@ -1,645 +1,610 @@
+# COP 5536 Fall 2025
+**Programming Project**
 
-# Gator Air Traffic Slot Scheduler — Project Specification (COP 5536 Fall 2025)*
+**Due – November 12th**
+
+---
+
+# Gator Air Traffic Slot Scheduler
 
 ## Problem Description
 
-Imagine building a system to manage flights at an airport with several runways. Every flight sends a request to the system when it wants a slot to take off or land. The request contains:
-
-* `flightID` (unique integer)
-* `airlineID` (integer)
-* `submitTime` (integer)
-* `priority` (integer; larger = more urgent)
-* `duration` (integer minutes needed on a runway)
-
-Once a flight starts using a runway, it cannot be stopped or moved until it finishes (non-preemptive). At any moment flights may be:
-
-* waiting for assignment,
-* already reserved for a future start time,
-* currently using a runway,
-* already finished.
-
-The goal: keep track of flights, decide ordering on runways, and update the plan whenever new requests arrive or time moves forward.
+Imagine you are building a system to manage flights at an airport with several runways. Every flight sends a request to the system when it wants a slot to take off or land. The request tells us which airline it belongs to, when it was submitted, how urgent it is (its priority), and how long it needs the runway. Once a flight starts using a runway, it cannot be stopped or moved until it finishes. At any moment, some flights may still be waiting for assignment, some may already have a runway reserved for a future time, some may currently be using a runway, and some may have already finished. The goal of the system is to keep track of all these flights, decide the order in which they should use the runways, and update the plan whenever new requests arrive or time moves forward.
 
 ---
 
 ## Terms (defined before use)
 
-* **System time (`currentTime`)**: the scheduler's current time. It only changes when an operation explicitly provides a time parameter:
+- **System time (`currentTime`)**: the time value the scheduler is currently considering. It only changes when an operation explicitly provides a time parameter.
+  For example:
+  - when a flight is submitted with a given `submitTime` (an integer), or
+  - when the user calls `Tick(t)`, where `t` is an integer input representing the new system time in minutes. (The exact behavior of `Tick(t)` will be explained later in the Operations section.)
 
-  * flight submission with `submitTime`, or
-  * `Tick(t)` where `t` is integer minutes.
+- **Flight request**: a record containing
+  - `flightID` (unique integer identifier),
+  - `airlineID` (integer),
+  - `submitTime` (integer, when the request enters the system),
+  - `priority` (integer; larger = more urgent),
+  - `duration` (integer minutes needed on a runway).
 
-* **Flight request fields**:
+- **Start time (`startTime`)**: the integer time (minutes) when a flight begins using its assigned runway.
 
-  * `flightID` (unique integer identifier)
-  * `airlineID` (integer)
-  * `submitTime` (integer)
-  * `priority` (integer; larger = more urgent)
-  * `duration` (integer minutes needed on a runway)
+- **End time / ETA**: the integer time when the flight finishes using its runway, calculated as `ETA = startTime + duration`.
 
-* **Start time (`startTime`)**: when a flight begins using its assigned runway (integer minutes).
+- **Non-preemptive**: once a flight starts on a runway, it cannot be paused, moved, or shortened.
 
-* **End time / ETA**: `ETA = startTime + duration`.
-
-* **Non-preemptive**: once a flight starts on a runway, it cannot be paused, moved, or shortened.
-
-* **Unsatisfied flights**: flights that have **not** yet started (includes both **Pending** and **Scheduled (not started)** states).
+- **Unsatisfied flights**: flights that have not yet started. This set includes both "Pending" and "Scheduled (not started)" states.
 
 ---
 
 ## Flight Lifecycle
 
-1. **Pending** — flight is in the request pool and not yet assigned a start time or runway.
-2. **Scheduled (not started)** — flight has an assigned runway, `startTime`, and `ETA`, but `currentTime < startTime`.
-3. **InProgress** — `startTime ≤ currentTime < ETA`.
-4. **Landed** — flight completed at its `ETA` and is removed from the system.
+Each Flight Lifecycle follows this pattern:
+
+- **Pending** – the flight is in the request pool and not yet bound to a start time or runway.
+- **Scheduled (not started)** – the flight has an assigned runway, `startTime`, and ETA (Estimated Time of Arrival), but `currentTime < startTime`.
+- **InProgress** – the flight has started: `startTime <= currentTime < ETA`.
+- **Landed** – the flight completed at its ETA and is removed from the system.
 
 ---
 
 ## How Time Advances (Two-Phase Update)
 
-Whenever `currentTime` changes (an operation supplies a time), the scheduler performs **two phases** **in order** before the requested operation:
+Whenever `currentTime` changes (because an operation provides a time), the scheduler performs **two phases in order** before any requested operation:
 
-### Phase 1 — Settle completions
+### **Phase 1 – Settle completions:**
+- Find all flights with `ETA <= currentTime`.
+- Mark them **Completed**, remove them from all data structures, and **print them in ascending ETA order**, breaking ties by smaller `flightID`.
 
-* Find all flights with `ETA ≤ currentTime`.
-* Mark them **Completed**, remove them from data structures, and print them in ascending `ETA` order; break ties by smaller `flightID`.
+### **Promotion Step (between phases):**
+Before Phase 2 begins, any flight with `startTime ≤ currentTime` is marked **InProgress** and **excluded from rescheduling** (non-preemptive rule).
 
-### Promotion step (between phases)
+### **Phase 2 – Reschedule Unsatisfied Flights**
+- Consider all **unsatisfied flights** (those that are still **Pending** or **Scheduled-but-not-started**).
+- **Recompute the schedule** from the new `currentTime`.
+  > We do this because the situation may have changed since the last time we scheduled. For example, some flights may have already completed, a new flight may have arrived, or runways may now be free at different times. To keep the plan fair and consistent, the system **clears previous assignments for unsatisfied flights** and **rebuilds their schedule from scratch**.
 
-* Any flight with `startTime ≤ currentTime` is marked **InProgress** and excluded from rescheduling (non-preemptive).
+- **Seeding runway availability**: We rebuild using a fresh copy of the runway pool seeded at `currentTime`, with each in-progress runway’s `nextFreeTime` set to flight’s ETA (so occupied runways remain blocked until they finish).
 
-### Phase 2 — Reschedule Unsatisfied Flights
+- **Greedy scheduling policy (deterministic and fair):**
+  When assigning flights during this rebuild, always follow this **global policy**:
 
-* Consider all **unsatisfied flights** (Pending or Scheduled-not-started).
-* **Clear** previous assignments for unsatisfied flights and **rebuild** the schedule from `currentTime` because the situation may have changed (completions, new requests, runway availability).
-* **Seeding runway availability**: use a fresh runway pool seeded at `currentTime`. For in-progress runways set `nextFreeTime` to that flight’s `ETA` so occupied runways stay blocked.
-* **Greedy scheduling policy (deterministic & fair)**:
+  1. **Choose the next flight** = the one with the **highest priority**.
+     - **Tie-breakers (in order)**: earlier `submitTime`, then smaller `flightID`.
+     - This is implemented using a **max pairing heap** with key `(priority, -submitTime, -flightID)`
 
-  1. Choose the **next flight**: highest priority; tie-breakers: earlier `submitTime`, then smaller `flightID`. Implement via **max pairing heap** with key `(priority, -submitTime, -flightID)`.
-  2. Choose the **runway**: earliest `nextFreeTime`; tie-breaker: smaller `runwayID`. Implement via **binary min-heap** keyed by `(nextFreeTime, runwayID)`.
-  3. Assign times:
+  2. **Choose the runway** = the one with the **earliest availability** (`nextFreeTime`).
+     - **Tie-breaker**: smaller `runwayID`.
 
-     * `startTime = max(currentTime, runway.nextFreeTime)`
-     * `ETA = startTime + duration`
-  4. Update runway availability: `runway.nextFreeTime = ETA`
-  5. Repeat until all unsatisfied flights are assigned.
-* **Updated ETAs**:
+  3. **Assign times**:
+     ```
+     startTime = max(currentTime, runway.nextFreeTime)
+     ETA = startTime + duration
+     ```
 
-  * If any not-yet-started flight’s `ETA` changes compared to its previously assigned value, print exactly one line:
+  4. **Update runway availability**: set `runway.nextFreeTime = ETA`.
 
-    ```
-    Updated ETAs: [flightID1: ETA1, flightID2: ETA2, …]
-    ```
+  5. Repeat until every unsatisfied flight has a new `startTime` and ETA.
 
-    Include only flights whose ETAs changed, sorted by increasing `flightID`.
-* After Phases 1 & 2 are complete, perform the requested operation (add runway, submit flight, reprioritize, cancel, ground-hold, etc.).
-* If the requested operation changes the set of unsatisfied flights, run Phase 2 **again** immediately after and print Updated ETAs if applicable.
+- **Updated ETAs**:
+  > If this process causes any **not-yet-started** flight's ETA to change compared to its previously assigned value, the system prints **exactly one line**:
+  ```
+  Updated ETAs: [flightID1: ETA1, flightID2: ETA2, …]
+  ```
+  Include **only the flights whose ETAs changed**, sorted by **increasing flightID**.
 
----
+> **Why can ETAs change?** Because when flights complete or new requests arrive, the order of assignment may shift, and some flights may get a different runway or start later than before. This leads to different ETAs even for flights that were already scheduled.
 
-## Data Structures (required; some must be implemented from scratch)
+- **After Phases 1 and 2 are complete**, the **requested operation itself** takes effect (for example, adding a runway, submitting a new flight, reprioritizing, cancelling, or applying a ground-hold).
 
-> **Note:** Max pairing heap and binary min-heap must be implemented from scratch. Hash tables may use standard library implementations.
-
-1. ### Pending Flights Queue — **Max Pairing Heap (Two-Pass Scheme)**
-
-   * **Key**: `(priority, -submitTime, -flightID)` (max-heap over the triple).
-   * **Payload**: pointer to flight record.
-   * **Ops required**: `push`, `pop` (extract best), `increase-key` (when priority increases), `erase` by handle (for cancel or ground-hold).
-   * **Implementation note**: use the two-pass max pairing heap scheme and store a handle/pointer to each node in the per-flight record for O(log n) updates.
-
-2. ### Runway Pool — **Binary Min Heap**
-
-   * **Key**: `(nextFreeTime, runwayID)`
-   * **Payload**: `{ runwayID, nextFreeTime }`
-   * Always pick earliest free runway for assignment, update `nextFreeTime` and push back.
-
-3. ### Active Flights — **Hash Table (by flightID)**
-
-   * **Key**: `flightID`
-   * **Payload**: `{ airlineID, priority, duration, runwayID, startTime, ETA }`
-   * Used for lookups by ID for cancellation, reprioritize, and printing. For printing, collect from the hash table and sort by `flightID`.
-
-4. ### Timetable (Completions Queue) — **Binary Min Heap**
-
-   * **Key**: `(ETA, flightID)`
-   * **Payload**: `{ runwayID }` (other fields via Active Flights)
-   * Supports: `insert`, `pop all with ETA ≤ currentTime`
-
-5. ### Airline Index — **Hashtable**
-
-   * **Role**: group unsatisfied flights by `airlineID`, efficient airline-wide operations (like GroundHold).
-   * **Key → Value**: `airlineID → set/list of flightIDs`
-   * Maintain as state changes; iterate set when applying a hold.
-
-6. ### Handles — **HashTable**
-
-   * **Role**: central map with references where each flight lives in other structures for coordinated, O(1) lookup and O(log n) updates.
-   * **Key → Value**: `flightID → { state, pairingNode?, ... }`
-   * At minimum, store pairing-heap node handle for pending.
+> **Why is scheduling updated before performing the requested operation?**
+> We perform the two phases first so that the system is always in a **clean and consistent state** before applying a new change.
+> If the requested operation changes the set of unsatisfied flights, **Phase 2 is run again immediately after**, and **Updated ETAs** are printed if applicable.
 
 ---
 
-## System Rules — Summary
+## Data Structures
+
+> **Note**: Max Pairing heap and binary min-heap **must be implemented from scratch**. Hash tables may use standard library implementations.
+
+### 1. **Pending Flights Queue – Max Pairing Heap (Two-Pass Scheme)**
+
+**Role & Purpose**: This is where every new flight request enters first. It ensures the system can always pick the highest-priority flight next, breaking ties by submit time and flightID.
+
+- **Key (max pairing heap over a triple)**: `(priority, -submitTime, -flightID)`
+  - Higher priority first. For ties, earlier `submitTime` wins because `-submitTime` is larger. Next tie: smaller `flightID` wins because `-flightID` is larger.
+- **Payload**: a pointer/handle to the corresponding flight record.
+- **Required Operations**:
+  - `push`, `pop` (extract best), `increase-key` (when priority increases), `erase` by handle (if a flight is cancelled or ground-held).
+  - *(Store a handle/pointer to each pairing-heap node in the per-flight record so you can update/delete in O(log n) time without searching)*
+- **Implementation Note**: Must use the **two-pass max pairing heap scheme**.
+
+---
+
+### 2. **Runway Pool – Binary Min Heap**
+
+**Role & Purpose**: This tracks all runways by their next available time. It ensures that when a flight is assigned, it always goes to the earliest free runway (ties by runwayID).
+
+- **Key (min-heap over a pair)**: `(nextFreeTime, runwayID)`
+- **Payload**: `{runwayID, nextFreeTime}`
+- **Workflow**: always pick the earliest free runway for the next assignment. After you schedule on it, update its `nextFreeTime = ETA` and push it back.
+
+---
+
+### 3. **Active Flights – Hash Table (by flightID)**
+
+**Role & Purpose**: Once a flight is scheduled, it is stored here. This lets the system quickly find it by ID for operations like cancellation, reprioritization, or printing all active flights.
+
+- **Key**: `flightID`
+- **Payload**: `{airlineID, priority, duration, runwayID, startTime, ETA}`
+- **Why needed**: some operations are naturally ID-based — you want to look up a specific flight.
+- **Ops**: insert/delete/search; For printing: Collect from the hash table and sort by `flightID` before printing.
+
+---
+
+### 4. **Timetable (Completions Queue) – Binary Min Heap**
+
+**Role & Purpose**: This keeps all scheduled flights sorted by their completion time. It ensures the system can efficiently find which flights should finish when time advances or when a `Tick(t)` command moves the system clock forward.
+
+- **Key**: `(ETA, flightID)` (ordered first by completion time, then by ID)
+- **Payload**: `{runwayID}` (other fields are retrieved via Active Flights)
+- **Why needed**: some operations are naturally time-based — you want to know which flights complete next.
+- **Ops**: insert, pop all flights with `ETA <= currentTime`
+
+---
+
+### 5. **Airline Index – Hashtable**
+
+**Role & Purpose**: This groups flights by airline while they are still unsatisfied (pending or scheduled-not-started). It makes airline-wide operations efficient without scanning all flights. (For example, a `GroundHold` on an airline means all of its unsatisfied flights are temporarily blocked from being scheduled.)
+
+- **Key → value**: `airlineID → set/list of flightIDs`
+- **Ops**: add/remove as state changes; iterate the set when applying a hold.
+
+---
+
+### 6. **Handles – HashTable (for cross-updates)**
+
+**Role & Purpose**: This central map ties everything together. It stores references to where each flight lives in the other data structures, so updates and deletions happen quickly and consistently.
+
+- **Key → value**:
+  ```
+  flightID → { state, pairingNode? }
+  ```
+  (If you implement extra handles, keep them here; at minimum you need the pairing-heap node for Pending.)
+- **Benefit**: O(1) lookup, O(log n) structural updates, no linear scans.
+
+---
+
+## System Rules to Remember (Summary)
 
 1. **State transitions**
-
-   * A flight enters **InProgress** when `currentTime = startTime`.
-   * A flight becomes **Completed** when `currentTime ≥ ETA`.
+   - A flight enters **InProgress** when `currentTime = startTime`.
+   - A flight becomes **Completed** when `currentTime ≥ ETA`.
 
 2. **Unsatisfied flights**
-
-   * `Unsatisfied = Pending ∪ Scheduled (not started)`.
-   * Only unsatisfied flights are rescheduled in Phase 2.
+   - Always: `Unsatisfied = Pending ∪ Scheduled (not started)`
+   - Only unsatisfied flights are rescheduled in Phase 2.
 
 3. **Completions (Phase 1 output)**
-
-   * Print flights that complete (`ETA ≤ currentTime`) in ascending `ETA` order, tie by smaller `flightID`.
+   - Print flights that complete (`ETA ≤ currentTime`) in ascending ETA.
+   - Break ties by smaller `flightID`.
 
 4. **Updated ETAs (Phase 2 output)**
+   - Print only if a flight's ETA changes after rescheduling.
+   - Include only those flights, sorted by `flightID`.
 
-   * Print only if a flight’s `ETA` changed after rescheduling; include only those flights, sorted by `flightID`.
-
-5. **Order of scheduling & operations**
-
-   * Always run Phase 1 (settle completions) and Phase 2 (reschedule) before applying the requested operation.
-   * If the operation changes unsatisfied flights, run Phase 2 again and print Updated ETAs if needed.
+5. **Order of scheduling and operations**
+   - Always run **Phase 1 (settle completions)** and **Phase 2 (reschedule)** before applying the requested operation.
+   - If the operation changes the unsatisfied flights, run **Phase 2 again** and print **Updated ETAs** if needed.
 
 6. **Determinism**
-
-   * Ties between flights: earlier `submitTime`, then smaller `flightID`.
-   * Ties between runways: smaller `runwayID`.
-   * Ensures identical outputs for correct implementations.
+   - Ties between flights: earlier `submitTime`, then smaller `flightID`.
+   - Ties between runways: smaller `runwayID`.
+   - Ensures all correct implementations produce the same output.
 
 ---
 
 ## Operations
 
-> **Important rule:** If an operation has a time parameter, advance (settle completions + reschedule + possibly Updated ETAs) **before** executing the operation itself. If the operation modifies unsatisfied flights, run Phase 2 again and print Updated ETAs if needed.
+> **Rule that always applies**: If an operation has a time parameter, you **must settle to that time first** (landings + reschedule + maybe Updated ETAs) **before** executing the operation’s own action. If that action modifies the set of pending/scheduled flights, **reschedule again** and print Updated ETAs if some ETAs changed.
+
+---
 
 ### 1. `Initialize(runwayCount)`
 
-**Purpose:** Start system with `runwayCount` runways.
+**Purpose**: Start the system with a given number of runways. No flights exist yet.
 
-**Behavior:**
+**Behavior**:
+- If `runwayCount ≤ 0` → print `"Invalid input."`
+- Else:
+  - Create runways with IDs `1 ... runwayCount`,
+  - Set each runway’s `nextFreeTime = 0`, Set `currentTime = 0`.
+  - Print confirmation that the system has been initialized with `"runwayCount"` runways.
 
-* If `runwayCount ≤ 0` → print `Invalid input.`
-* Else:
-
-  * Create runways with IDs `1 ... runwayCount`.
-  * Set each runway `nextFreeTime = 0`.
-  * Set `currentTime = 0`.
-
-**Outputs:**
-
-* Valid:
-
-  ```
-  <runwayCount> Runways are now available
-  ```
-* Invalid:
-
-  ```
-  Invalid input. Please provide a valid number of runways.
-  ```
+**Outputs**:
+```text
+<runwayCount> Runways are now available
+```
+or
+```text
+Invalid input. Please provide a valid number of runways.
+```
 
 ---
 
 ### 2. `SubmitFlight(flightID, airlineID, submitTime, priority, duration)`
 
-**Purpose:** Add a new flight request at `submitTime`.
+**Purpose**: Add a new flight request to the system at a given `submitTime`.
 
-**Behavior:**
+**Behavior**:
+- Advance time to `submitTime` (settle completions + reschedule).
+- If `flightID` already exists → print `"Duplicate flight"` and stop.
+- Else:
+  - Insert flight into the **Pending Flights Queue**.
+  - Reschedule all unsatisfied flights using the greedy policy.
+  - Print the new flight's assigned ETA.
+- If this rescheduling causes other unsatisfied flights to get new ETAs → print a single **Updated ETAs** line listing only those flights (sorted by `flightID`).
 
-* Advance time to `submitTime` (settle completions + reschedule).
-* If `flightID` already exists → print `Duplicate flight` and stop.
-* Else:
+**Outputs**:
+```text
+Flight <flightID> scheduled - ETA: <ETA>
+```
+```text
+Duplicate FlightID
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
-  * Insert flight into Pending Flights Queue.
-  * Reschedule all unsatisfied flights using the greedy policy.
-  * Print the new flight's assigned `ETA`.
-* If rescheduling causes other unsatisfied flights to get new ETAs → print `Updated ETAs: [...]` listing only those flights sorted by `flightID`.
+#### Example:
+> Flow of `SubmitFlight(203, airlineID=1, submitTime=0, priority=10, duration=5)`
 
-**Outputs:**
+**Initial State**:
+- System initialized with 2 runways.
+- `currentTime = 0`.
+- Already scheduled:
+  - Flight 201 → Runway 1, [0-4], ETA=4
+  - Flight 202 → Runway 2, [0-3], ETA=3
 
-* On success (after reschedule):
+**Step 1** – Advance time to `submitTime (0)`
+- `submitTime = 0`, which is equal to current time.
+- **Phase 1**: No flights have `ETA ≤ 0` → no landings.
+- **Promotion step**: Flights with `startTime ≤ currentTime` (201 and 202) are marked **InProgress** and excluded from rescheduling.
+- **Phase 2 (pre-operation)**: no unsatisfied flights → no changes.
 
-  ```
-  Flight <flightID> scheduled - ETA: <ETA>
-  ```
-* If duplicate:
+**Step 2** – Check for duplicates → Flight 203 does not exist → continue.
 
-  ```
-  Duplicate FlightID
-  ```
-* If other ETAs changed:
+**Step 3** – Insert into **Pending Flights Queue**
+- Flight 203 added with key `(10, 0, -203)`.
 
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Step 4** – Reschedule unsatisfied flights (post-operation Phase 2)
+- Unsatisfied = {203}
+- Earliest free runway after `currentTime=0` is Runway 2, free at t=3.
+- Assign: `startTime=3`, `ETA=8`, Update Runway 2 → `nextFreeTime=8`
 
-**Example walkthrough** is in the document (omitted here for brevity).
+**Step 5** – Compare ETAs → New flight → just print its ETA.
+
+**Final Output**:
+```text
+Flight 203 scheduled - ETA: 8
+```
 
 ---
 
 ### 3. `CancelFlight(flightID, currentTime)`
 
-**Purpose:** Remove a flight that has not started yet.
+**Purpose**: Remove a flight that has **not started yet**. If it started or completed, you can't cancel it.
 
-**Behavior:**
+**Behavior**:
+- Advance time to `currentTime` → settle completions → reschedule unsatisfied.
+- Lookup `flightID`. If not found → print `"Flight does not exist."`
+- If flight is **In Progress** or **Completed** → print `"Cannot cancel: Flight <id> has already departed."`
+- Else (**Pending / Scheduled-not-started**):
+  - Remove from: Pending Max Pairing heap / Active table / Timetable / Airline index / Handles.
+  - Reschedule remaining unsatisfied flights from `currentTime`.
+  - Print: `"Flight <id> has been canceled."`
+  - If other ETAs changed → print **Updated ETAs: [...]**
 
-* Advance time to `currentTime` → settle completions → reschedule unsatisfied.
-* Lookup `flightID`.
-
-  * If not found → print `Flight <flightID> does not exist`.
-  * If In Progress or Completed → print `Cannot cancel: Flight <id> has already departed.`
-  * Else (Pending / Scheduled-not-started):
-
-    * Remove it from Pending / Active / Timetable / Airline index / Handles.
-    * Reschedule remaining unsatisfied flights from `currentTime`.
-    * Print: `Flight <id> has been canceled.`
-    * If other ETAs changed → print `Updated ETAs: [...]`.
-
-**Outputs:**
-
-* Removed (pending or not started):
-
-  ```
-  Flight <flightID> has been canceled
-  ```
-* Already in progress or landed:
-
-  ```
-  Cannot cancel. Flight <flightID> has already departed
-  ```
-* Not found:
-
-  ```
-  Flight <flightID> does not exist
-  ```
-* If ETAs changed after reschedule:
-
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Outputs**:
+```text
+Flight <flightID> has been canceled
+```
+```text
+Cannot cancel. Flight <flightID> has already departed
+```
+```text
+Flight <flightID> does not exist
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
 ---
 
 ### 4. `Reprioritize(flightID, currentTime, newPriority)`
 
-**Purpose:** Change a flight’s priority before it starts and rebuild schedule.
+**Purpose**: Change a flight's priority **before it starts**; then rebuild schedule so it may move earlier/later.
 
-**Behavior:**
+**Behavior**:
+- Advance time to `currentTime` → settle completions → reschedule unsatisfied.
+- Lookup `flightID`. If not found → print `"Flight <id> does not exist."`
+- If flight is **In Progress** or **Completed** → print `"Cannot reprioritize: Flight <id> has already departed."`
+- Else (**Pending / Scheduled-not-started**):
+  - Update priority (pairing heap: `increase-key` if priority increases; `erase+insert` if decreases).
+  - Reschedule all unsatisfied flights from `currentTime` using greedy policy.
+  - Print: `"Priority of Flight <id> has been updated to <newPriority>."`
+  - If other flights' ETAs changed → print **Updated ETAs: [...]**
 
-* Advance time to `currentTime` → settle completions → reschedule unsatisfied.
-* Lookup `flightID`.
+**Outputs**:
+```text
+Priority of Flight <flightID> has been updated to <newPriority>
+```
+```text
+Cannot reprioritize. Flight <flightID> has already departed
+```
+```text
+Flight <flightID> not found
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
-  * If not found → print `Flight <id> does not exist.`
-  * If In Progress or Completed → print `Cannot reprioritize: Flight <id> has already departed.`
-  * Else (Pending / Scheduled-not-started):
+#### Example:
+> Command: `Reprioritize(403, currentTime=0, newPriority=10)`
 
-    * Update priority:
+**System**: 2 runways, `currentTime=0`. Already scheduled:
+- 401 (priority 7, duration 4) → R1 [0-4], ETA=4
+- 404 (priority 5, duration 2) → R2 [0-2], ETA=2
+- 402 (priority 6, duration 3) → R2 [2-5], ETA=5
+- 403 (priority 5, duration 5) → R1 [4-9], ETA=9
 
-      * If priority increases: pairing heap `increase-key`.
-      * If priority decreases: erase + insert.
-    * Reschedule all unsatisfied flights from `currentTime`.
-    * Print: `Priority of Flight <id> has been updated to <newPriority>.`
-    * If other flights’ ETAs changed → print single `Updated ETAs: [...]`.
+**Flow**:
+- Phase 1 @ t=0 → nothing lands.
+- Promotion step: 401 and 404 have `startTime=0` → **InProgress** (non-preemptive).
+- Phase 2 (pre-operation): unsatisfied {402,403} → 402 [2-5], 403 [4-9] (no ETA change)
+- Apply operation: Increase 403’s priority to 10.
+- Phase 2 (post-operation): Re-run scheduling with new priorities
+  - 403: start=2, ETA=7
+  - 402: start=4, ETA=7
 
-**Outputs:**
-
-* Updated:
-
-  ```
-  Priority of Flight <flightID> has been updated to <newPriority>
-  ```
-* Already in progress or landed:
-
-  ```
-  Cannot reprioritize. Flight <flightID> has already departed
-  ```
-* Not found:
-
-  ```
-  Flight <flightID> not found
-  ```
-* If ETAs changed:
-
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Output**:
+```text
+Priority of Flight 403 has been updated to 10
+Updated ETAs: [402: 7, 403: 7]
+```
 
 ---
 
 ### 5. `AddRunways(count, currentTime)`
 
-**Purpose:** Add `count` new runways available at `currentTime`, then reschedule.
+**Purpose**: Increase capacity by adding `count` new runways (available starting at `currentTime`), then reschedule.
 
-**Behavior:**
+**Behavior**:
+- Advance time to `currentTime` → settle completions → reschedule unsatisfied.
+- If `count <= 0` → print `"Invalid input."`
+- Else:
+  - Create `count` new runways with consecutive IDs; set each `nextFreeTime = currentTime`; push into runway heap.
+- Reschedule all unsatisfied flights from `currentTime` using the greedy policy.
+- Print: confirmation that additional runways are available.
+- If any ETAs changed → print **Updated ETAs: [...]**
 
-* Advance time to `currentTime` → settle completions → reschedule unsatisfied.
-* If `count ≤ 0` → print `Invalid input.`
-* Else:
+**Outputs**:
+```text
+Additional <count> Runways are now available
+```
+```text
+Invalid input. Please provide a valid number of runways.
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
-  * Create `count` new runways with consecutive IDs; set each `nextFreeTime = currentTime`; push into runway heap.
-  * Reschedule unsatisfied flights from `currentTime`.
-  * Print confirmation and, if any ETAs changed, print `Updated ETAs: [...]`.
+#### Example:
+> Command: `AddRunways(count=1, currentTime=0)`
 
-**Outputs:**
+**System**: 2 runways, `currentTime=0`. Already in system:
+- 501 (priority 8, duration 4) → R1 [0-4], ETA=4
+- 502 (priority 7, duration 6) → R2 [0-6], ETA=6
+- 503 (priority 6, duration 3) → scheduled later as R1 [4-7], ETA=7
 
-* Valid:
+**Flow**:
+- Reschedule with Runway 3 now also free at 0:
+  - 501 stays R1 [0-4], 502 stays R2 [0-6]
+  - 503 moves earlier → R3 [0-3], ETA=3
 
-  ```
-  Additional <count> Runways are now available
-  ```
-* Invalid:
-
-  ```
-  Invalid input. Please provide a valid number of runways.
-  ```
-* If ETAs changed:
-
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Output**:
+```text
+Additional 1 Runways are now available
+Updated ETAs: [503: 3]
+```
 
 ---
 
 ### 6. `GroundHold(airlineLow, airlineHigh, currentTime)`
 
-**Purpose:** Temporarily block unsatisfied flights whose `airlineID` ∈ `[airlineLow, airlineHigh]` from being scheduled.
+**Purpose**: Temporarily block **unsatisfied flights** whose `airlineID` is in `[airlineLow, airlineHigh]` from being scheduled.
 
-**Behavior:**
+**Behavior**:
+- Advance time to `currentTime` → settle completions → reschedule unsatisfied.
+- If `airlineHigh < airlineLow` → print `"Invalid input. Please provide a valid airline range."`
+- Else:
+  - Remove all **unsatisfied flights** with `airlineID ∈ [low, high]` from all structures.
+  - *(Flights **In Progress** keep running; GroundHold does **not** affect them.)*
+- Reschedule the remaining unsatisfied flights from `currentTime`.
+- Print: `"Flights of the airlines in the range [low, high] have been grounded"`
 
-* Advance time to `currentTime` → settle completions → reschedule unsatisfied.
-* If `airlineHigh < airlineLow` → print `Invalid input. Please provide a valid airline range.`
-* Else:
+**Outputs**:
+```text
+Flights of the airlines in the range [<airlineLow>, <airlineHigh>] have been grounded
+```
+```text
+Invalid input. Please provide a valid airline range.
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
-  * Remove all unsatisfied flights with `airlineID` in range from all structures (pending/active/timetable/airline-index/handles).
+#### Example:
+> Command: `GroundHold(10, 12, currentTime=1)`
 
-    * Note: flights **In Progress** are **unaffected**.
-  * Reschedule remaining unsatisfied flights from `currentTime`.
-  * Print: `Flights of the airlines in the range [low, high] have been grounded`
-  * If any ETAs changed → print `Updated ETAs: [...]`.
+**System at t=1**:
+- 601 (airlineID=10, priority 8, duration 4) → R1 [0-4] (**In Progress**)
+- 602 (airlineID=12, priority 7, duration 3) → R2 [2-5] (Scheduled-not-started)
+- 603 (airlineID=9, priority 6, duration 3) → R1 [4-7] (Scheduled-not-started)
 
-**Outputs:**
+**Flow**:
+- Advance to 1 → nothing completes; 601 is **In Progress** (not affected).
+- Remove unsatisfied flights with airline ∈ [10, 12]: removes 602.
+- Reschedule remaining unsatisfied (603) from t=1:
+  - With 602 removed, R2 is free at 0 → start = max(1,0)=1 → 603 → R2 [1-4], ETA=4 (was 7).
 
-* Valid range:
-
-  ```
-  Flights of the airlines in the range [<airlineLow>, <airlineHigh>] have been grounded
-  ```
-* Invalid range:
-
-  ```
-  Invalid input. Please provide a valid airline range.
-  ```
-* If ETAs changed:
-
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Output**:
+```text
+Flights of the airlines in the range [10, 12] have been grounded
+Updated ETAs: [603: 4]
+```
 
 ---
 
 ### 7. `PrintActive()`
 
-**Purpose:** Show all flights still in the system (pending, scheduled-not-started, or in-progress).
+**Purpose**: Show all flights that are still in the system (pending or scheduled/not-started or in-progress).
 
-**Behavior:**
+**Behavior**:
+- Do **not** change `currentTime`.
+- Gather flights from **Active Flights** (hash table), sort by `flightID`.
+- Print one line per flight: `flightID, airlineID, runwayID, startTime, ETA`.
+  - For **Pending** flights with no assigned times, use `-1` for times.
 
-* Do **not** change `currentTime`.
-* Gather flights from Active Flights hash table, sort by `flightID`.
-* Print one line per flight:
+**Outputs**:
+```text
+[flight<flightID>, airline<airlineID>, runway<runwayID>, start<startTime>, ETA<ETA>]
+```
+```text
+No active flights
+```
 
-  ```
-  [flight<flightID>, airline<airlineID>, runway<runwayID>, start<startTime>, ETA<ETA>]
-  ```
+#### Example:
+> Command: `PrintActive()`
 
-  * For **Pending** flights with no assigned times, print `startTime = -1` and `ETA = -1`.
-
-**Outputs:**
-
-* If flights exist (ordered by `flightID`):
-
-  ```
-  [flight<flightID>, airline<airlineID>, runway<runwayID>, start<startTime>, ETA<ETA>]
-  ```
-* If none:
-
-  ```
-  No active flights
-  ```
+**Output**:
+```text
+[flight701, airline<id>, runway1, start1, ETA5]
+[flight702, airline<id>, runway2, start3, ETA4]
+[flight703, airline<id>, runway-1, start-1, ETA-1]
+```
 
 ---
 
 ### 8. `PrintSchedule(t1, t2)`
 
-**Purpose:** Show **only unsatisfied** flights (Scheduled-but-not-started) whose ETA ∈ `[t1, t2]`.
+**Purpose**: Show **only unsatisfied flights** (i.e., flights that are **Scheduled-but-not-started**) whose ETA lies within the interval `[t1, t2]`.
 
-**Behavior:**
+**Behavior**:
+- Do **not** change `currentTime`.
+- Gather flights from **Active Flights Table**
+- Filter only those flights that:
+  - Have state == **SCHEDULED**
+  - Have `startTime > currentTime` (they have not started yet).
+  - Have `ETA ∈ [t1,t2]`
+- Ignores **Pending** flights (no assigned ETA yet) and **InProgress** flights (already started).
+- Sort results by `(ETA, flightID)` before printing.
 
-* Do **not** change `currentTime`.
-* Gather flights from Active Flights table.
-* Filter flights that:
+**Outputs**:
+```text
+[<flightID>]
+```
+```text
+There are no flights in that time period
+```
 
-  * `state == SCHEDULED`
-  * `startTime > currentTime` (not started yet)
-  * `ETA ∈ [t1, t2]`
-* Ignore Pending and InProgress flights.
-* Sort results by `(ETA, flightID)` before printing.
+#### Example:
+> Command: `PrintSchedule(5, 9)`
 
-**Outputs:**
-
-* If flights exist (ordered by ETA, then flightID), print each flightID on its own line:
-
-  ```
-  [<flightID>]
-  ```
-* If none:
-
-  ```
-  There are no flights in that time period
-  ```
+**Output**:
+```text
+[802]
+[803]
+```
 
 ---
 
 ### 9. `Tick(t)`
 
-**Purpose:** Advance system clock to `t`, land flights that finish by `t`, then reschedule.
+**Purpose**: Advance the system clock to `t`, land whatever finishes by `t`, then reschedule what’s left.
 
-**Behavior:**
+**Behavior**:
+- Advance `currentTime → t`
+- **Phase 1**: complete & print all flights with `ETA <= t` in `(ETA, flightID)` order; remove from all structures.
+- **Phase 2**: reschedule unsatisfied from time `t`.
+- If any ETAs changed → print **Updated ETAs: [...]**
 
-* Advance `currentTime` → `t`.
-* Phase 1: complete & print flights with `ETA ≤ t` in `(ETA, flightID)` order; remove them from structures.
-* Phase 2: reschedule unsatisfied from `t`.
-* If any ETAs changed → print `Updated ETAs: [...]`.
-
-**Outputs:**
-
-* For each landed flight (ordered by ETA, tie by flightID):
-
-  ```
-  Flight <flightID> has landed at time <ETA>
-  ```
-* If none landed and no ETAs changed: print nothing.
-* If ETAs changed after reschedule:
-
-  ```
-  Updated ETAs: [<flightID1>: <ETA1>, ...]
-  ```
+**Outputs**:
+```text
+Flight <flightID> has landed at time <ETA>
+```
+```text
+Updated ETAs: [<flightID1>: <ETA1>, ...]
+```
 
 ---
 
 ### 10. `Quit()`
 
-**Purpose:** End processing immediately.
+**Purpose**: End processing immediately.
 
-**Behavior:** Print termination line.
+**Behavior**: Print the termination line.
 
-**Output:**
-
-```
+**Output**:
+```text
 Program Terminated!!
 ```
 
 ---
 
-## Programming Environment & Execution
+## Programming Environment
 
-* Acceptable languages: **Java, C++, or Python**.
-* Program will be tested on `thunder.cise.ufl.edu` server.
-* Submission must include a **Makefile** that creates an executable named `gatorAirTrafficScheduler`.
-* Execution commands:
+You may use **Java**, **C++**, or **Python**. Your program will be tested using the Java or `g++` compiler or Python interpreter on `thunder.cise.ufl.edu`.
 
-  * C/C++: `./gatorAirTrafficScheduler file_name`
-  * Java: `java gatorAirTrafficScheduler file_name`
-  * Python: `python3 gatorAirTrafficScheduler file_name`
-* `file_name` is the input test data file.
+Your submission **must include a Makefile** that creates an executable file named `gatorAirTrafficScheduler`.
+
+**Execution**:
+```bash
+# C/C++
+./gatorAirTrafficScheduler file_name
+
+# Java
+java gatorAirTrafficScheduler file_name
+
+# Python
+python3 gatorAirTrafficScheduler file_name
+```
 
 ---
 
 ## Input and Output Requirements
 
-* Read input from a text file specified as a **command-line argument**.
-* Write output to a text file named: `input_filename_output_file.txt`
-  (e.g., `test1.txt` → `test1_output_file.txt`).
-* Program should terminate when the operation encountered is `Quit()`.
+- Read input from a text file (`input_filename` from command-line).
+- All output written to: `input_filename + "_output_file.txt"`
+- Program terminates on `Quit()`
 
 ---
 
-## Examples (Input / Output)
+## Example 1
 
-### Example 1 — Input
-
-```
+**Input**:
+```text
 Initialize(2)
 SubmitFlight(201, 1, 0, 5, 4)
-SubmitFlight(202, 2, 0, 6, 4)
-SubmitFlight(203, 1, 0, 4, 5)
-PrintSchedule(1, 10)
-SubmitFlight(205, 4, 2, 7, 2)
-PrintSchedule(4, 6)
-Reprioritize(203, 3, 9)
-GroundHold(5, 4, 3)
-GroundHold(4, 4, 3)
-AddRunways(1, 3)
-SubmitFlight(206, 6, 3, 6, 4)
-CancelFlight(206, 3)
-Tick(4)
-SubmitFlight(204, 3, 4, 8, 2)
-AddRunways(0, 5)
-PrintActive()
-PrintSchedule(5, 10)
+...
 Quit()
 ```
 
-### Example 1 — Output
-
-```
+**Output**:
+```text
 2 Runways are now available
 Flight 201 scheduled - ETA: 4
-Flight 202 scheduled - ETA: 4
-Flight 203 scheduled - ETA: 9
-[203]
-Flight 205 scheduled - ETA: 6
-[205]
-
-Priority of Flight 203 has been updated to 9
-Invalid input. Please provide a valid airline range.
-Flights of the airlines in the range [4, 4] have been grounded
-Additional 1 Runways are now available
-Updated ETAs: [203: 8]
-Flight 206 scheduled - ETA: 8
-Flight 206 has been canceled
-Flight 201 has landed at time 4
-Flight 202 has landed at time 4
-Flight 204 scheduled - ETA: 6
-Invalid input. Please provide a valid number of runways.
-[flight203, airline1, runway3, start3, ETA8]
-[flight204, airline3, runway1, start4, ETA6]
-There are no flights in that time period
-Program Terminated!!
-```
-
----
-
-### Example 2 — Input
-
-```
-Initialize(2)
-SubmitFlight(301, 5, 0, 7, 4)
-SubmitFlight(302, 6, 0, 6, 5)
-SubmitFlight(303, 7, 0, 5, 3)
-PrintSchedule(5, 8)
-GroundHold(6, 6, 0)
-SubmitFlight(301, 5, 0, 7, 4)
-SubmitFlight(304, 8, 1, 9, 4)
-Reprioritize(304, 1, 10)
-PrintSchedule(4, 8)
-AddRunways(1, 1)
-PrintSchedule(4, 8)
-SubmitFlight(305, 9, 2, 6, 3)
-CancelFlight(305, 2)
-AddRunways(0, 2)
-Tick(3)
-PrintActive()
-PrintSchedule(3, 7)
-Tick(4)
-Quit()
-```
-
-### Example 2 — Output
-
-```
-2 Runways are now available
-Flight 301 scheduled - ETA: 4
-Flight 302 scheduled - ETA: 5
-Flight 303 scheduled - ETA: 7
-
-[303]
-Flights of the airlines in the range [6, 6] have been grounded
-Duplicate FlightID
-Flight 304 scheduled - ETA: 8
-Updated ETAs: [303: 8]
-Priority of Flight 304 has been updated to 10
-[303]
-[304]
-Additional 1 Runways are now available
-Updated ETAs: [303: 7, 304: 5]
-[303]
-Flight 305 scheduled - ETA: 7
-Updated ETAs: [303: 8]
-Flight 305 has been canceled
-Updated ETAs: [303: 7]
-Invalid input. Please provide a valid number of runways.
-[flight301, airline5, runway1, start0, ETA4]
-[flight302, airline6, runway2, start0, ETA5]
-[flight303, airline7, runway1, start4, ETA7]
-[flight304, airline8, runway3, start1, ETA5]
-[303]
-Flight 301 has landed at time 4
+...
 Program Terminated!!
 ```
 
@@ -647,39 +612,39 @@ Program Terminated!!
 
 ## Submission Requirements
 
-* **Makefile** that compiles source and produces an executable `gatorAirTrafficScheduler`.
-* **Source program** (C++/Java/Python), well-commented.
-* **Report (PDF)** with project details, function prototypes, and explanations:
+1. **Makefile** – `make` → `gatorAirTrafficScheduler`
+2. **Source Program** – well-commented
+3. **Report (PDF)**:
+   - Name, UFID, UF Email
+   - Function prototypes
+   - Program structure explanation
 
-  * Include student info: Name, UFID, UF Email.
-  * Present function prototypes and program structure.
-* Submit a single ZIP named `LastName_FirstName.zip` with all files in the top-level directory (no nested directories).
-* Submit on Canvas (do not email TA). Late submissions not accepted.
+**Zip**: `LastName_FirstName.zip`
+Submit via **Canvas**.
 
 ---
 
 ## Grading Policy
 
-* Correct implementation and execution: **25 pts**
-* Comments and readability: **15 pts**
-* Report: **20 pts**
-* Testcases: **40 pts**
+| Category | Points |
+|--------|--------|
+| Correct implementation | 25 |
+| Comments & readability | 15 |
+| Report | 20 |
+| Test cases | 40 |
 
-Penalty deductions include (examples):
-
-* Source files not in single directory after unzip: `-5`
-* Incorrect output file name: `-5`
-* Error in Makefile: `-5`
-* Makefile does not produce executable with required commands: `-5`
-* Hard-coded input file name instead of argument: `-5`
-* Not following output format: `-5`
-* Other input/output or submission requirement violations: `-3`
-
-Programs may be checked for correctness and runtime performance. Plagiarism detection will be used.
+**Deductions**:
+- Wrong directory structure: -5
+- Wrong output filename: -5
+- Makefile errors: -5
+- Hardcoded input: -5
+- Output formatting: -5
+- Other I/O issues: -3
 
 ---
 
 ## Miscellaneous
 
-* Implement **Pairing Heap** and **Binary min-heap** from scratch (do not use built-in heap libraries).
-* Work individually (discussion allowed) — plagiarism checks will be performed.
+- **Implement Pairing Heap and Binary Min-Heap from scratch**.
+- No built-in priority queues.
+- Work individually. Plagiarism will be checked.

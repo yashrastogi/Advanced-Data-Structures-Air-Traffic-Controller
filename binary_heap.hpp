@@ -19,7 +19,7 @@ private:
 
   size_t rightChild(int index) const { return 2 * index + 2; }
 
-  void bubbleUp(int i) {
+  size_t bubbleUp(size_t i) {
     while (i != 0) {
       if (comp_(data_[i], data_[parent(i)])) {
         swap(&data_[i], &data_[parent(i)]);
@@ -28,6 +28,7 @@ private:
         break;
       }
     }
+    return i;
   }
 
   void swap(T *a, T *b) {
@@ -36,8 +37,8 @@ private:
     *b = temp;
   }
 
-  void bubbleDown(int i) {
-    int most = i;
+  size_t bubbleDown(size_t i) {
+    size_t most = i;
 
     if (leftChild(i) < size() && comp_(data_[leftChild(i)], data_[most]))
       most = leftChild(i);
@@ -49,6 +50,7 @@ private:
       swap(&data_[i], &data_[most]);
       bubbleDown(most);
     }
+    return most;
   }
 
 public:
@@ -66,6 +68,15 @@ public:
     }
   }
 
+  bool eraseOne(size_t arrIndex) {
+    if (arrIndex >= data_.size())
+      return false;
+    swap(&data_[arrIndex], &data_[size() - 1]);
+    data_.pop_back();
+    bubbleDown(arrIndex);
+    return true;
+  }
+
   bool eraseOne(T value) {
     for (size_t i = 0; i < size(); i++) {
       if (data_[i] == value) {
@@ -79,14 +90,11 @@ public:
 
   T pop() {
     if (size() == 0)
-      throw std::out_of_range("Heap is empty");
+      throw std::out_of_range("BinaryHeap is empty");
     T value = data_[0];
     data_[0] = data_.back();
     data_.pop_back();
     bubbleDown(0);
-    // for (size_t i = 0; i < size_; i++)
-    //   std::cout << data_[i] << " ";
-    // std::cout << std::endl;
     return value;
   }
 
@@ -104,17 +112,22 @@ public:
 
   T top() {
     if (size() == 0)
-      throw std::out_of_range("Heap is empty");
+      throw std::out_of_range("BinaryHeap is empty (no top)");
     return data_[0];
   }
 
-  void push(const T &value) {
+  size_t push(const T &value) {
     data_.emplace_back(value);
-    bubbleUp(data_.size() - 1);
-    // for (size_t i = 0; i < size(); i++)
-    //   std::cout << data_[i] << " ";
-    // std::cout << std::endl;
+    return bubbleUp(data_.size() - 1);
   }
+
+  ~BinaryHeap() { clear(); }
+
+  void clear() noexcept {
+      data_.clear();
+  }
+
+  std::vector<T> data() const { return data_; }
 
   size_type size() const { return data_.size(); }
 

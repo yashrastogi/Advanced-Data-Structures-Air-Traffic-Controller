@@ -81,11 +81,12 @@ public:
     }
   }
 
-  void push(const T &value) {
+  PairingHeapNode<T> *push(const T &value) {
     PairingHeapNode<T> *newNode =
         new PairingHeapNode<T>{value, nullptr, nullptr, nullptr};
     root_ = meld(root_, newNode);
     totalNodes++;
+    return newNode;
   }
 
   // Only allowed to increase or keep same the priority
@@ -141,13 +142,13 @@ public:
 
   const T &top() const {
     if (!root_)
-      throw std::runtime_error("Heap is empty");
+      throw std::runtime_error("PairingHeap is empty (no top)");
     return root_->value;
   }
 
   T pop() {
     if (!root_)
-      throw std::runtime_error("Heap is empty");
+      throw std::runtime_error("PairingHeap is empty");
 
     T value = root_->value;
     PairingHeapNode<T> *childPointer = root_->child;
