@@ -90,7 +90,7 @@ public:
   }
 
   // Only allowed to increase or keep same the priority
-  PairingHeapNode<T> * changeKey(PairingHeapNode<T> *theNode, T newValue) {
+  PairingHeapNode<T> *changeKey(PairingHeapNode<T> *theNode, T newValue) {
     if (!theNode)
       throw std::runtime_error("Node to change doesn't exist");
 
