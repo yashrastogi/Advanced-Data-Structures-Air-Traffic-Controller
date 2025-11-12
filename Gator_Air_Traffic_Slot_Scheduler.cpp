@@ -2,6 +2,8 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -9,6 +11,8 @@
 #include "pairing_heap.hpp"
 
 using namespace std;
+
+stringstream ss;
 
 enum FlightState { PENDING, SCHEDULED, IN_PROGRESS, COMPLETED };
 
@@ -143,20 +147,20 @@ public:
 
   void initialize(int runwayCount) {
     if (runwayCount <= 0) {
-      cout << "Invalid input" << endl;
+      ss << "Invalid input" << "\n";
     }
     for (int i = 0; i < runwayCount; i++) {
       runwayPool.push({0, i + 1});
     }
     currentTime = 0;
-    cout << runwayCount << " Runways are now available" << endl;
+    ss << runwayCount << " Runways are now available" << "\n";
   }
 
   void submitFlight(int flightId, int airlineId, int submitTime, int priority,
                     int duration) {
     tick(submitTime);
     if (handles.count(flightId)) {
-      cout << "Duplicate FlightID" << endl;
+      ss << "Duplicate FlightID" << "\n";
       return;
     }
 
@@ -198,8 +202,8 @@ public:
 
     // Print completed flights in ascending ETA order
     while (!completed.empty()) {
-      cout << "Flight " << completed.top().second << " has landed at time "
-           << completed.top().first << endl;
+      ss << "Flight " << completed.top().second << " has landed at time "
+         << completed.top().first << "\n";
       completed.pop();
     }
 
@@ -269,9 +273,9 @@ public:
       // // print timetable data()
       // auto d = timeTable.data();
       // for (size_t i = 0; i < timeTable.size(); i++) {
-      //   cout << "TimeTable Entry " << i << ": FlightID " << d[i].flightId
+      //   ss << "TimeTable Entry " << i << ": FlightID " << d[i].flightId
       //        << ", ETA " << d[i].ETA << ", RunwayID " << d[i].runwayId <<
-      //        endl;
+      //        "\n";
       // }
 
       activeFlights[pendingFlight.flightId] = ActiveFlightData(
@@ -283,9 +287,8 @@ public:
           rescheduleETAChanged[pendingFlight.flightId] != ETA) {
         rescheduleETAChanged[pendingFlight.flightId] = ETA;
       } else if (!rescheduleETAChanged.count(pendingFlight.flightId)) {
-        cout << "Flight " << pendingFlight.flightId
-             << " scheduled - ETA: " << ETA
-             << endl; // New scheduling, print specially
+        ss << "Flight " << pendingFlight.flightId << " scheduled - ETA: " << ETA
+           << "\n"; // New scheduling, print specially
       } else {
         rescheduleETAChanged.erase(pendingFlight.flightId);
       }
@@ -295,19 +298,19 @@ public:
     BinaryHeap<pair<int, int>, less<pair<int, int>>> rescheduled;
     for (const auto &entry : rescheduleETAChanged) {
       rescheduled.push({entry.first, entry.second});
-    }  
+    }
     if (!rescheduled.empty()) {
-      cout << "Updated ETAs: [";
+      ss << "Updated ETAs: [";
       bool first = true;
       while (!rescheduled.empty()) {
         auto entry = rescheduled.pop();
         if (!first) {
-          cout << ", ";
+          ss << ", ";
         }
-        cout << entry.first << ": " << entry.second;
+        ss << entry.first << ": " << entry.second;
         first = false;
       }
-      cout << "]" << endl;
+      ss << "]" << "\n";
     }
   }
 
@@ -325,11 +328,11 @@ public:
     }
 
     if (schedulePrintHeap.empty()) {
-      cout << "There are no flights in that time period" << endl;
+      ss << "There are no flights in that time period" << "\n";
     }
 
     while (!schedulePrintHeap.empty()) {
-      cout << schedulePrintHeap.pop().second << endl;
+      ss << schedulePrintHeap.pop().second << "\n";
     }
   }
 
@@ -345,7 +348,7 @@ public:
                             to_string(data.ETA) + "]"});
     }
     while (!activePrintHeap.empty()) {
-      cout << activePrintHeap.top().second << endl;
+      ss << activePrintHeap.top().second << "\n";
       activePrintHeap.pop();
     }
   }
@@ -353,7 +356,7 @@ public:
   void groundHold(int airlineLow, int airlineHigh, int currentTime) {
     tick(currentTime);
     if (airlineHigh < airlineLow) {
-      cout << "Invalid input. Please provide a valid airline range." << endl;
+      ss << "Invalid input. Please provide a valid airline range." << "\n";
       return;
     }
 
@@ -374,35 +377,35 @@ public:
         }
       }
     }
-    cout << "Flights of the airlines in the range [" << airlineLow << ", "
-         << airlineHigh << "] have been grounded" << endl;
+    ss << "Flights of the airlines in the range [" << airlineLow << ", "
+       << airlineHigh << "] have been grounded" << "\n";
     tick(currentTime);
   }
 
   void addRunways(int count, int currentTime) {
     tick(currentTime);
     if (count <= 0) {
-      cout << "Invalid input. Please provide a valid number of runways."
-           << endl;
+      ss << "Invalid input. Please provide a valid number of runways."
+         << "\n";
       return;
     }
     int existingRunways = runwayPool.size();
     for (int i = 0; i < count; i++) {
       runwayPool.push({currentTime, existingRunways + i + 1});
     }
-    cout << "Additional " << count << " Runways are now available" << endl;
+    ss << "Additional " << count << " Runways are now available" << "\n";
     tick(currentTime);
   }
 
   void reprioritize(int flightId, int currentTime, int newPriority) {
     tick(currentTime);
     if (!handles.count(flightId)) {
-      cout << "Flight " << flightId << " not found" << endl;
+      ss << "Flight " << flightId << " not found" << "\n";
       return;
     } else if (handles[flightId].state == IN_PROGRESS ||
                handles[flightId].state == COMPLETED) {
-      cout << "Cannot reprioritize. Flight " << flightId
-           << " has already departed" << endl;
+      ss << "Cannot reprioritize. Flight " << flightId
+         << " has already departed" << "\n";
       return;
     }
 
@@ -417,21 +420,21 @@ public:
       // Update in activeFlights
       activeFlights[flightId].flightRequest.priority = newPriority;
     }
-    cout << "Priority of Flight " << flightId << " has been updated to "
-         << newPriority << endl;
+    ss << "Priority of Flight " << flightId << " has been updated to "
+       << newPriority << "\n";
     tick(currentTime);
   }
 
   void cancelFlight(int flightId, int currentTime) {
     tick(currentTime);
     if (!handles.count(flightId)) {
-      cout << "Flight " << flightId << " does not exist" << endl;
+      ss << "Flight " << flightId << " does not exist" << "\n";
       return;
     }
     if (handles[flightId].state == IN_PROGRESS ||
         handles[flightId].state == COMPLETED) {
-      cout << "Cannot cancel: Flight " << flightId << " has already departed"
-           << endl;
+      ss << "Cannot cancel: Flight " << flightId << " has already departed"
+         << "\n";
       return;
     }
     // Remove from all data structures
@@ -447,13 +450,25 @@ public:
     }
     activeFlights.erase(flightId);
     handles.erase(flightId);
-    cout << "Flight " << flightId << " has been canceled" << endl;
+    ss << "Flight " << flightId << " has been canceled" << "\n";
     tick(currentTime);
   }
 };
 
-void quit() {
-  cout << "Program Terminated!!" << endl;
+void quit(ifstream &inputFile, char *argv[]) {
+  ss << "Program Terminated!!" << "\n";
+  inputFile.close();
+  string inputFileName =
+      string(argv[1]).substr(0, string(argv[1]).find_last_of('.'));
+  ofstream outfile(inputFileName + "_output_file.txt");
+  if (!outfile.is_open()) {
+    cerr << "Failed to open output file for writing" << "\n";
+    exit(1);
+  }
+  outfile << ss.str();
+  ss.flush();
+  outfile.flush();
+  outfile.close();
   exit(0);
 }
 
@@ -462,7 +477,7 @@ int main(int argc, char *argv[]) {
     throw std::invalid_argument("Invalid number of arguments");
   ifstream inputFile(argv[1]);
   if (!inputFile.is_open()) {
-    cerr << "Failed to open input file" << endl;
+    cerr << "Failed to open input file" << "\n";
     return 1;
   }
 
@@ -471,7 +486,7 @@ int main(int argc, char *argv[]) {
   string line;
   while (getline(inputFile, line)) {
     if (line == "Quit()") {
-      quit();
+      quit(inputFile, argv);
     } else if (line.find("Tick") != string::npos) {
       int start = line.find("(");
       int end = line.find(")");
@@ -541,6 +556,5 @@ int main(int argc, char *argv[]) {
       throw runtime_error("Invalid command: " + line);
     }
   }
-  inputFile.close();
   return 0;
 }
