@@ -388,11 +388,11 @@ public:
   void reprioritize(int flightId, int currentTime, int newPriority) {
     tick(currentTime);
     if (!handles.count(flightId)) {
-      cout << "Flight " << flightId << " does not exist" << endl;
+      cout << "Flight " << flightId << " not found" << endl;
       return;
     } else if (handles[flightId].state == IN_PROGRESS ||
                handles[flightId].state == COMPLETED) {
-      cout << "Cannot reprioritize: Flight " << flightId
+      cout << "Cannot reprioritize. Flight " << flightId
            << " has already departed" << endl;
       return;
     }
@@ -416,7 +416,7 @@ public:
   void cancelFlight(int flightId, int currentTime) {
     tick(currentTime);
     if (!handles.count(flightId)) {
-      cout << "Flight does not exist" << endl;
+      cout << "Flight " << flightId << " does not exist" << endl;
       return;
     }
     if (handles[flightId].state == IN_PROGRESS ||
