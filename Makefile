@@ -1,12 +1,12 @@
-# ---- Configurable variables (override on the command line) -------------------
+# Configurable variables
 CXX       ?= g++
 TARGET    ?= gatorAirTrafficScheduler
 SRCS      ?= Gator_Air_Traffic_Slot_Scheduler.cpp
-BUILD     ?= debug          # options: debug | release
-SAN       ?= address        # set empty to disable (e.g., SAN=)
-ARCH      ?= arm64          # only used on macOS; set empty to skip
+BUILD     ?= debug
+SAN       ?= address
+ARCH      ?= arm64
 
-# ---- Derived flags -----------------------------------------------------------
+# Derived flags
 WARN      := -Wall -Wextra -Wpedantic -Werror
 DEBUG_F   := -g
 OPT_F_DBG := -O1
@@ -28,49 +28,33 @@ ifeq ($(BUILD),release)
 else
   CXXFLAGS := $(WARN) $(DEBUG_F) $(OPT_F_DBG) $(ARCH_F)
 endif
-# Sanitizer applies in both modes if SAN is set
 CXXFLAGS += $(SAN_F)
-LDFLAGS  := $(SAN_F)
 
-# ---- Files / objects ---------------------------------------------------------
-OBJS := $(SRCS:.cpp=.o)
-
-# ---- Default target ----------------------------------------------------------
 .PHONY: all
 all: $(TARGET)
 
-# Keep your original 'main' target as an alias to the build
 .PHONY: main
 main: $(TARGET)
 
-# Link
-$(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+$(TARGET): $(SRCS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
 
-# Compile
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# ---- Convenience targets -----------------------------------------------------
 .PHONY: run
 run: $(TARGET)
 	./$(TARGET) input.txt
 
-# Rebuild from scratch
 .PHONY: rebuild
 rebuild: clean all
 
-# Clean artifacts
 .PHONY: clean
 clean:
-	$(RM) $(OBJS) $(TARGET)
+	$(RM) $(TARGET)
 
 # Nodemon helper (requires nodemon installed)
 .PHONY: nodemon
 nodemon:
 	nodemon --ext "cpp,hpp,txt" --exec 'make run || exit 1 ; make clean'
 
-# Show config
 .PHONY: info
 info:
 	@echo "CXX       = $(CXX)"
@@ -78,7 +62,5 @@ info:
 	@echo "SAN       = $(SAN)"
 	@echo "ARCH      = $(ARCH)"
 	@echo "CXXFLAGS  = $(CXXFLAGS)"
-	@echo "LDFLAGS   = $(LDFLAGS)"
 	@echo "SRCS      = $(SRCS)"
-	@echo "OBJS      = $(OBJS)"
 	@echo "TARGET    = $(TARGET)"
